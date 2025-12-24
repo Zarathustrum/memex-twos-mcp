@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Convert Twos markdown export to structured JSON.
+Convert Twos markdown export (Markdown with timestamps format) to structured JSON.
 
-This script parses the Twos markdown format and extracts:
+This script parses the Twos "Markdown with timestamps" export format and extracts:
 - Task content and timestamps
 - Hierarchical relationships (parent/child tasks)
 - Metadata (completion status, links, tags, people)
@@ -439,7 +439,7 @@ def parse_twos_file(file_path: Path) -> Dict[str, Any]:
     Parse Twos markdown file into structured data.
 
     Args:
-        file_path: Path to the Twos Markdown export file.
+        file_path: Path to the Twos export file (Markdown with timestamps format).
 
     Returns:
         Dictionary with metadata and list of tasks
@@ -578,8 +578,14 @@ def main():
     Returns:
         Exit code integer (0 for success, 1 for error).
     """
-    parser = argparse.ArgumentParser(description="Convert Twos markdown export to JSON")
-    parser.add_argument("input_file", type=Path, help="Path to Twos markdown file")
+    parser = argparse.ArgumentParser(
+        description="Convert Twos markdown export (with timestamps) to JSON"
+    )
+    parser.add_argument(
+        "input_file",
+        type=Path,
+        help="Path to Twos markdown file (Markdown with timestamps format)",
+    )
     parser.add_argument("-o", "--output", type=Path, help="Output JSON file path")
     parser.add_argument("--pretty", action="store_true", help="Pretty print JSON")
 

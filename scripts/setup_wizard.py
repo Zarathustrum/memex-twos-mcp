@@ -156,7 +156,9 @@ def setup_data_files(export_file: str | None) -> str | None:
         print(f"ERROR: File not found: {export_path}")
         return None
 
-    print("Do you have a Twos export file? (markdown format)")
+    print("Do you have a Twos export file? (Markdown with timestamps format)")
+    print("In Twos app: Settings -> Export -> Markdown with timestamps")
+    print("")
     print("1. Yes, I have an export file")
     print("2. No, use sample data for testing")
     print("3. Skip for now")
@@ -411,7 +413,7 @@ def main() -> None:
     parser.add_argument(
         "--export-file",
         type=str,
-        help="Path to a Twos Markdown export file to use without prompting",
+        help="Path to a Twos export file (Markdown with timestamps format)",
     )
     parser.add_argument(
         "--claude-config",

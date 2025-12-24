@@ -29,7 +29,9 @@ Instead of manually searching through thousands of things, ask Claude:
 
 ### 1. Export your Twos data
 
-In the Twos app: Settings -> Export -> Markdown format
+In the Twos app: Settings -> Export -> **Markdown with timestamps**
+
+> **Important:** You must select "Markdown with timestamps" (not plain Markdown). The timestamps are required for the parser to extract dates and organize your data.
 
 ### 2. Run setup wizard
 

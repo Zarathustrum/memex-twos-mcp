@@ -23,7 +23,7 @@ I need help analyzing and grooming personal task data exported from the Twos pro
 
 ### Data Context
 
-**Source**: Twos app markdown export converted to JSON
+**Source**: Twos app markdown export (Markdown with timestamps format) converted to JSON
 **Time Range Max**: Recent 2-year range
 **Record Count Max**: ~10,000 things
 **Purpose**: Personal knowledge management, life chronology, pattern detection
