@@ -29,10 +29,10 @@ Claude queries and analysis
 - ✅ JSON converter with rich metadata extraction
 - ✅ Initial data conversion (~10,000 things)
 - ✅ Both repos on GitHub
+- ✅ LLM-assisted data grooming (identify duplicates, normalize entities, suggest schema improvements)
 
 **Next Steps**:
-1. LLM-assisted data grooming (identify duplicates, normalize entities, suggest schema improvements)
-2. Add analysis tools (patterns, timelines, narratives)
+1. Add analysis tools (patterns, timelines, narratives)
 
 ## File Structure
 
