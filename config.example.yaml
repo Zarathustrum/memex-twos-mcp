@@ -1,0 +1,13 @@
+# Memex Twos MCP Configuration
+# Copy to ~/.memex-twos/config.yaml and customize
+
+database:
+  # Path to SQLite database
+  path: <path-to-project>/data/processed/twos.db
+
+mcp:
+  # MCP server settings
+  log_level: INFO
+
+  # Claude Desktop integration
+  claude_desktop_config: auto  # or provide path

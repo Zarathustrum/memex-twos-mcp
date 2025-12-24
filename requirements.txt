@@ -1,0 +1,13 @@
+# Core dependencies
+python-dateutil>=2.8.2
+PyYAML>=6.0.1
+
+# Future MCP dependencies (to be added)
+# mcp>=0.1.0
+
+# Development dependencies
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.1.0
+mypy>=1.7.0
+types-PyYAML>=6.0.12.20250915

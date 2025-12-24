@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "memex-twos": {
+      "command": "python",
+      "args": [
+        "-m",
+        "memex_twos_mcp.server"
+      ],
+      "cwd": "<path-to-project>",
+      "env": {
+        "PYTHONPATH": "<path-to-project>/src"
+      }
+    }
+  }
+}
