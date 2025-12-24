@@ -311,3 +311,49 @@ MIT License. See [LICENSE](LICENSE).
 - Report bugs: use the GitHub issue template
 - Request features: use the GitHub issue template
 - Read docs: [MCP_SETUP.md](MCP_SETUP.md)
+
+# Memex Twos MCP - FAQ
+
+## **Do I need to know how to code?**
+Nope! There's a setup wizard that walks you through everything. You'll need to be comfortable running a few terminal commands, but it's pretty straightforward. If you can export from Twos and copy-paste commands, you're good.
+
+## **What are the requirements?**
+- Python 3.10+ (most systems already have this)
+- Claude Desktop (for using the MCP server)
+- A Twos export file
+- *Optional:* Claude Code CLI if you want AI-powered data grooming and entity classification (improves accuracy)
+
+## **Is my data private?**
+100%. Everything stays on your machine - nothing gets uploaded to external servers except when Claude Desktop queries its API (same as any Claude conversation). The MCP server runs locally via stdin/stdout.
+
+## **What's this "entity classification" thing?**
+The Twos parser sometimes misclassifies sentence-starting verbs and place names as people (e.g., "New York" → person named "New", or "Put the keys away" → person named "Put"). Entity classification uses AI to filter these out and normalize name variants. It's optional but makes queries like "things with Alice" way more accurate.
+
+You can run it with AI (requires Claude Code, takes 2-3 minutes) or skip it entirely. The server works either way.
+
+## **How long does setup take?**
+- Basic setup (no AI features): ~2 minutes
+- Full setup with AI grooming and entity classification: ~7-10 minutes
+
+The AI steps are optional and can be run later if you want to start fast.
+
+## **What kind of queries can I run?**
+Here are some examples I've tried:
+- "What things did I have about the renovation last summer?"
+- "Show me everything I planned with [person name]"
+- "Find things tagged #work from January"
+- "When did I first mention the basement project?"
+- "Give me a timeline of all contractor-related Things"
+
+Basically anything you could manually search for in Twos, but Claude can now do it conversationally and piece together threads across months.
+
+## **Does it work with the Twos API or real-time sync?**
+No, it uses Markdown exports. You export from Twos, run the converter, and load it into SQLite. If you want to update it later, just export again and re-run the loader. Not real-time, but works great for retrospectives and analysis.
+
+## **Can I see an example of it working?**
+I don't want to post screenshots with my personal data, but happy to share example queries/results if folks are interested. The README has some example queries too.
+
+## **Wow, did you build this yourself?**
+No, this project is the result of a number of iterations with Claude Code and Codex, with a little help from Gemini CLI and Perplexity.
+
+I knew how to architect it and the data flow I wanted, the AIs did the heavy lifting on implementation and debugging.
