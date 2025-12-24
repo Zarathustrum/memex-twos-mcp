@@ -4,7 +4,7 @@ This folder contains a sanitized Twos markdown export for testing.
 
 ## Files
 
-- `sample_export.md` - Generic Twos export with placeholder names and tags.
+- `sample_export.md` - Generic Twos export (Markdown with timestamps format) with placeholder names and tags.
 
 ## Usage
 
