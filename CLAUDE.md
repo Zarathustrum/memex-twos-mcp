@@ -1,12 +1,8 @@
 # Claude Context: memex-twos-mcp
 
-## ⚠️ Git Operations
-
-If you have internal git conventions for this project, follow them before doing any git operations. Otherwise, use a standard GitHub workflow (branch, commit, PR).
-
 ## Project Overview
 
-Learning project to build a Model Context Protocol (MCP) server for analyzing personal thing data from Twos app exports. Primary goals are learning MCP fundamentals, data engineering, and enabling LLM-powered life pattern analysis.
+Model Context Protocol (MCP) server for analyzing personal thing data from Twos app exports. Primary goals are learning MCP fundamentals, data engineering, and enabling LLM-powered life pattern analysis.
 
 ## Architecture & Data Flow
 
