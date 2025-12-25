@@ -268,7 +268,7 @@ All personal data files are gitignored. Never commit:
 
 ## Notes for Future Claude Sessions
 
-- This is a learning project - prefer simple, understandable implementations over clever optimizations
+- Prefer simple, understandable implementations over clever optimizations
 - The human's actual data is valuable - be careful with transformations, always preserve originals
 - When adding features, consider: "Does this help answer questions about life patterns?"
 - MCP server should be queryable, not just batch processing
