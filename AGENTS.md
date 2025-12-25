@@ -266,7 +266,7 @@ All personal data files are gitignored. Never commit:
 - Claude MCP Integration: (to be added)
 - Twos app context: See memex-twos-data/README.md
 
-## Notes for Future Claude Sessions
+## Notes for Future Agent Sessions
 
 - Prefer simple, understandable implementations over clever optimizations
 - The human's actual data is valuable - be careful with transformations, always preserve originals
