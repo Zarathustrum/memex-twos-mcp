@@ -7,7 +7,7 @@ Transform your [Twos](https://www.twosapp.com/) app exports into a queryable kno
 
 ## What is this?
 
-Memex Twos MCP is a [Model Context Protocol](https://modelcontextprotocol.io/) server that lets you query your personal task history from the Twos productivity app using natural language through Claude.
+Memex Twos MCP is a [Model Context Protocol](https://modelcontextprotocol.io/) server that lets you query your personal "Thing" history from the Twos productivity app using natural language through Claude.
 
 Instead of manually searching through thousands of things, ask Claude:
 - "What things did I have about home renovation last summer?"
