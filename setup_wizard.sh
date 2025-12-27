@@ -38,6 +38,29 @@ fi
 echo "Processing Twos export: $EXPORT_FILE"
 echo ""
 
+# Check if venv exists
+if [ ! -d ".venv" ]; then
+    echo "Virtual environment not found at .venv"
+    echo ""
+    read -p "Would you like to create it now? (y/n): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "Creating virtual environment..."
+        python3 -m venv .venv
+        echo "Virtual environment created successfully"
+        echo ""
+        echo "Installing dependencies..."
+        .venv/bin/pip install -e .
+        echo ""
+    else
+        echo "Setup cancelled. Please create a virtual environment manually with:"
+        echo "  python3 -m venv .venv"
+        echo "  source .venv/bin/activate"
+        echo "  pip install -e ."
+        exit 0
+    fi
+fi
+
 # Activate venv
 echo "Activating virtual environment..."
 source .venv/bin/activate
