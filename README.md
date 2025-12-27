@@ -38,38 +38,37 @@ In the Twos app: Settings -> Export -> **Markdown with timestamps**
 ```bash
 git clone https://github.com/yourusername/memex-twos-mcp.git
 cd memex-twos-mcp
-python scripts/setup_wizard.py
-```
-
-Optional: run the shell wrapper that accepts a Twos export path (and an optional
-Claude Desktop config path):
-
-```bash
 ./setup_wizard.sh /path/to/Twos-Export.md
-./setup_wizard.sh /path/to/Twos-Export.md /path/to/claude_desktop_config.json
 ```
 
-You can also pass the export and Claude config paths directly:
-
-```bash
-python scripts/setup_wizard.py --export-file /path/to/Twos-Export.md
-python scripts/setup_wizard.py --export-file /path/to/Twos-Export.md --claude-config /path/to/claude_desktop_config.json
-```
-
-To override Claude config auto-detection globally, set `MEMEX_CLAUDE_CONFIG`.
-
-The wizard can:
-- Create a virtual environment
+**That's it!** The wizard will:
+- Create a virtual environment (if needed)
 - Install dependencies
 - Convert your export to JSON
 - Clean and groom your data (remove duplicates, fix quality issues)
 - Load cleaned data to SQLite
 - Generate Claude Desktop configuration
 
+**Optional:** Specify a custom Claude config location:
+```bash
+./setup_wizard.sh /path/to/Twos-Export.md /path/to/claude_desktop_config.json
+```
+
+**Alternative:** Run the Python wizard directly for interactive mode:
+```bash
+python scripts/setup_wizard.py
+# Or with explicit paths:
+python scripts/setup_wizard.py --export-file /path/to/Twos-Export.md --claude-config /path/to/claude_desktop_config.json
+```
+
+To override Claude config auto-detection globally, set `MEMEX_CLAUDE_CONFIG`.
+
 ### 3. Configure Claude
 
 Restart Claude Desktop and try:
 "What is in my task database?"
+
+> **Windows Users:** Closing the Claude Desktop window sometimes doesn't exit the process. If MCP config doesn't load after "restarting," fully terminate Claude via Task Manager (Ctrl+Shift+Esc → find "Claude" → End Task), then restart the app.
 
 ## Requirements
 

@@ -2,6 +2,50 @@
 
 This guide explains how to set up and use the Memex Twos MCP server with Claude.
 
+## Quick Setup (Recommended)
+
+If you want automated setup, use the setup wizard instead of following the manual steps below:
+
+### Shell Wrapper (Easiest)
+
+```bash
+./setup_wizard.sh /path/to/Twos-Export.md
+```
+
+**What it does:**
+1. Checks for virtual environment (creates if missing)
+2. Activates the venv
+3. Runs the Python setup wizard with your export file
+4. Handles the complete pipeline: convert → groom → load → configure
+
+**Options:**
+- Specify custom Claude config: `./setup_wizard.sh /path/to/export.md /path/to/claude_desktop_config.json`
+- Auto-creates venv if missing (asks for confirmation)
+- Uses venv Python for reliable package imports
+
+### Python Wizard (Interactive)
+
+```bash
+python scripts/setup_wizard.py
+```
+
+**Interactive mode** - prompts you for:
+- Export file location
+- Claude Desktop config path (auto-detects or asks)
+- Whether to run each step (convert, groom, load, configure)
+
+**Non-interactive mode** - pass paths directly:
+```bash
+python scripts/setup_wizard.py --export-file /path/to/Twos-Export.md
+python scripts/setup_wizard.py --export-file /path/to/export.md --claude-config /path/to/claude_desktop_config.json
+```
+
+**Environment variable:** Set `MEMEX_CLAUDE_CONFIG` to override auto-detection globally.
+
+---
+
+**When to use manual setup instead:** Use the manual steps below if you want fine-grained control over each step, need to debug individual components, or want to customize the data processing pipeline.
+
 ## Prerequisites
 
 - Python 3.10 or higher
@@ -96,6 +140,8 @@ npx @modelcontextprotocol/inspector
 ```
 
 3. **Restart Claude Desktop**
+
+   > **Windows Users:** Closing the Claude Desktop window sometimes doesn't exit the process. If the MCP server doesn't appear after "restarting," fully terminate Claude via Task Manager (Ctrl+Shift+Esc → find "Claude" → End Task), then restart the app.
 
 4. **Verify Connection**:
    - Open Claude Desktop
