@@ -97,13 +97,11 @@ def build_server_config(use_wsl_command: bool) -> dict:
         }
 
     # Claude Desktop will execute this command when starting the MCP server.
+    # Use sys.executable to get the current Python interpreter (venv if activated)
     return {
-        "command": "python",
+        "command": sys.executable,
         "args": ["-m", "memex_twos_mcp.server"],
         "cwd": str(project_root),
-        "env": {
-            "PYTHONPATH": str(project_root / "src"),
-        },
     }
 
 
