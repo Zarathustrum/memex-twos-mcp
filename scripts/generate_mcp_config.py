@@ -59,7 +59,9 @@ def _claude_config_path() -> Path:
     if _is_wsl():
         wsl_user = os.getenv("WINUSER") or os.getenv("USER")
         if wsl_user:
-            windows_path = (
+            # Return Windows Claude Desktop config path even if file doesn't exist yet
+            # (the script will create it)
+            return (
                 Path("/mnt/c")
                 / "Users"
                 / wsl_user
@@ -68,8 +70,6 @@ def _claude_config_path() -> Path:
                 / "Claude"
                 / "claude_desktop_config.json"
             )
-            if windows_path.exists():
-                return windows_path
 
     return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
 
@@ -186,6 +186,11 @@ def main() -> None:
     # I/O boundary: write the updated config back to disk.
     write_config(target_path, data)
     print("OK: Configuration updated")
+
+    if use_wsl_command:
+        print("\nNOTE: Windows users must restart Claude Desktop for changes to take effect.")
+        print("      If Claude Desktop appears closed but won't restart, you may need to")
+        print("      kill the process in Task Manager (look for 'Claude' or 'claude.exe').")
 
 
 if __name__ == "__main__":
