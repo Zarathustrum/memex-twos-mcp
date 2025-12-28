@@ -85,33 +85,212 @@ class TwosDatabase:
 
     def search_content(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
-        Full-text search across thing content.
+        Full-text search across thing content with BM25 relevance ranking.
 
         Args:
             query: Search query (FTS5 syntax)
             limit: Maximum number of results
 
         Returns:
-            List of matching thing dictionaries
+            List of matching thing dictionaries with relevance_score and snippet
+
+        Raises:
+            ValueError: If the FTS5 query syntax is invalid
         """
-        # FTS5 queries can raise sqlite3.OperationalError for invalid syntax.
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        # Join FTS results with full thing data
+        try:
+            # Use BM25 ranking (bm25() returns negative scores, lower = better)
+            # Also extract highlighted snippets showing match context
+            cursor.execute(
+                """
+                SELECT t.*,
+                       bm25(things_fts) AS relevance_score,
+                       snippet(things_fts, 1, '<b>', '</b>', '...', 32) AS snippet
+                FROM things t
+                JOIN things_fts fts ON t.id = fts.thing_id
+                WHERE things_fts MATCH ?
+                ORDER BY bm25(things_fts)
+                LIMIT ?
+            """,
+                (query, limit),
+            )
+
+            results = [dict(row) for row in cursor.fetchall()]
+            conn.close()
+
+            return results
+
+        except sqlite3.OperationalError as e:
+            conn.close()
+            # FTS5 query syntax error - provide helpful error message
+            raise ValueError(
+                f"Invalid FTS5 query syntax: {query}. "
+                f"Error: {str(e)}. "
+                f"Tip: Use AND, OR, NOT operators, or quote phrases."
+            ) from e
+
+    def search_candidates(
+        self, query: str, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for things and return minimal candidate previews (two-phase retrieval).
+
+        This returns only essential fields for LLM preview:
+        - id, relevance_score, snippet
+        - timestamp, tags, people
+        - is_completed
+
+        Use get_things_by_ids() to fetch full content for selected candidates.
+
+        Args:
+            query: Search query (FTS5 syntax)
+            limit: Maximum number of candidates to return
+
+        Returns:
+            List of candidate dictionaries with minimal fields (~75% smaller than full records)
+
+        Raises:
+            ValueError: If the FTS5 query syntax is invalid
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            # First, get matching thing IDs with BM25 scores and snippets
+            cursor.execute(
+                """
+                SELECT
+                    t.id,
+                    bm25(things_fts) AS relevance_score,
+                    snippet(things_fts, 1, '<b>', '</b>', '...', 32) AS snippet,
+                    t.timestamp,
+                    t.is_completed
+                FROM things t
+                JOIN things_fts fts ON t.id = fts.thing_id
+                WHERE things_fts MATCH ?
+                ORDER BY bm25(things_fts)
+                LIMIT ?
+            """,
+                (query, limit),
+            )
+
+            results = []
+            for row in cursor.fetchall():
+                result = dict(row)
+                thing_id = result["id"]
+
+                # Fetch tags for this thing
+                cursor.execute(
+                    """
+                    SELECT t.name
+                    FROM tags t
+                    JOIN thing_tags tt ON t.id = tt.tag_id
+                    WHERE tt.thing_id = ?
+                """,
+                    (thing_id,),
+                )
+                result["tags"] = [r[0] for r in cursor.fetchall()]
+
+                # Fetch people for this thing
+                cursor.execute(
+                    """
+                    SELECT p.name
+                    FROM people p
+                    JOIN thing_people tp ON p.id = tp.person_id
+                    WHERE tp.thing_id = ?
+                """,
+                    (thing_id,),
+                )
+                result["people"] = [r[0] for r in cursor.fetchall()]
+
+                results.append(result)
+
+            conn.close()
+            return results
+
+        except sqlite3.OperationalError as e:
+            conn.close()
+            raise ValueError(
+                f"Invalid FTS5 query syntax: {query}. "
+                f"Error: {str(e)}. "
+                f"Tip: Use AND, OR, NOT operators, or quote phrases."
+            ) from e
+
+    def get_thing_by_id(self, thing_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a single thing by ID with full details.
+
+        Args:
+            thing_id: The thing ID to fetch
+
+        Returns:
+            Thing dictionary with all fields, or None if not found
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM things WHERE id = ?", (thing_id,))
+        row = cursor.fetchone()
+
+        if row is None:
+            conn.close()
+            return None
+
+        result = dict(row)
+
+        # Fetch related entities
         cursor.execute(
             """
-            SELECT t.* FROM things t
-            JOIN things_fts fts ON t.id = fts.thing_id
-            WHERE things_fts MATCH ?
-            ORDER BY t.timestamp DESC
-            LIMIT ?
+            SELECT p.name
+            FROM people p
+            JOIN thing_people tp ON p.id = tp.person_id
+            WHERE tp.thing_id = ?
         """,
-            (query, limit),
+            (thing_id,),
         )
+        result["people_mentioned"] = [row[0] for row in cursor.fetchall()]
 
-        results = [dict(row) for row in cursor.fetchall()]
+        cursor.execute(
+            """
+            SELECT t.name
+            FROM tags t
+            JOIN thing_tags tt ON t.id = tt.tag_id
+            WHERE tt.thing_id = ?
+        """,
+            (thing_id,),
+        )
+        result["tags"] = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT link_text, url FROM links WHERE thing_id = ?", (thing_id,)
+        )
+        result["links"] = [
+            {"text": row[0], "url": row[1]} for row in cursor.fetchall()
+        ]
+
         conn.close()
+        return result
+
+    def get_things_by_ids(self, thing_ids: List[str]) -> List[Dict[str, Any]]:
+        """
+        Batch fetch things by IDs with full details.
+
+        Args:
+            thing_ids: List of thing IDs to fetch
+
+        Returns:
+            List of thing dictionaries with all fields, in same order as input IDs
+        """
+        if not thing_ids:
+            return []
+
+        results = []
+        for thing_id in thing_ids:
+            thing = self.get_thing_by_id(thing_id)
+            if thing:
+                results.append(thing)
 
         return results
 
