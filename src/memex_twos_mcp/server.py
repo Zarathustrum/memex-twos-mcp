@@ -281,6 +281,14 @@ async def list_tools() -> list[Tool]:
             ),
             inputSchema={"type": "object", "properties": {}},
         ),
+        Tool(
+            name="get_cache_stats",
+            description=(
+                "Get query cache performance statistics including cache size, "
+                "hit rate, and TTL. Useful for monitoring cache effectiveness."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
     ]
 
 
@@ -411,6 +419,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         info = database.get_count_info()
         return [TextContent(type="text", text=json.dumps(info, indent=2, default=str))]
 
+    elif name == "get_cache_stats":
+        stats = database.get_cache_stats()
+        return [TextContent(type="text", text=json.dumps(stats, indent=2, default=str))]
+
     else:
         raise ValueError(f"Unknown tool: {name}")
 
@@ -421,7 +433,7 @@ async def main():
 
     Side effects:
         - Reads configuration from disk and environment variables.
-        - Opens a SQLite database connection on demand per request.
+        - Opens a persistent SQLite database connection (connection pooling).
         - Starts a JSON-RPC server over stdin/stdout.
 
     Returns:
@@ -443,18 +455,26 @@ async def main():
 
     db_path = config.db_path
 
-    # Initialize database wrapper (actual connections are opened per query).
+    # Initialize database wrapper with connection pooling and caching
     db = TwosDatabase(db_path)
 
     print(
-        "MCP stdio server ready. This process expects JSON-RPC over stdin; "
-        "use an MCP client to connect.",
+        "MCP stdio server ready (with connection pooling and caching). "
+        "This process expects JSON-RPC over stdin; use an MCP client to connect.",
         file=sys.stderr,
     )
 
-    # Run server over stdio; no network sockets are opened here.
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+    try:
+        # Run server over stdio; no network sockets are opened here.
+        async with stdio_server() as (read_stream, write_stream):
+            await app.run(
+                read_stream, write_stream, app.create_initialization_options()
+            )
+    finally:
+        # Clean shutdown: close database connection
+        if db:
+            db.close()
+            print("Database connection closed.", file=sys.stderr)
 
 
 if __name__ == "__main__":

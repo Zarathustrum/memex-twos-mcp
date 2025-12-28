@@ -4,19 +4,23 @@ Provides safe query methods for MCP tools.
 """
 
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from .cache import QueryCache
 
 
 class TwosDatabase:
     """Wrapper for querying the Twos SQLite database."""
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, cache_ttl_seconds: int = 900):
         """
-        Initialize database wrapper.
+        Initialize database wrapper with connection pooling and caching.
 
         Args:
             db_path: Path to the SQLite database file on disk.
+            cache_ttl_seconds: TTL for query cache in seconds (default: 900 = 15 minutes)
 
         Raises:
             FileNotFoundError: If the database file does not exist.
@@ -25,19 +29,45 @@ class TwosDatabase:
         if not db_path.exists():
             raise FileNotFoundError(f"Database not found: {db_path}")
 
+        # Connection pooling (single persistent connection per instance)
+        self._connection: Optional[sqlite3.Connection] = None
+        self._lock = threading.Lock()
+
+        # Query result cache
+        self.cache = QueryCache(ttl_seconds=cache_ttl_seconds)
+
     def _get_connection(self) -> sqlite3.Connection:
         """
-        Get a database connection with row factory.
+        Get a persistent database connection with row factory (connection pooling).
+
+        Returns a single shared connection instead of creating new connections per query.
+        Thread-safe via locking.
 
         Returns:
             A sqlite3.Connection that yields rows as dict-like objects.
 
         Side effects:
-            Opens a file-backed SQLite connection.
+            Opens a file-backed SQLite connection on first call.
         """
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row  # Return rows as dictionaries
-        return conn
+        with self._lock:
+            if self._connection is None:
+                self._connection = sqlite3.connect(
+                    self.db_path, check_same_thread=False  # Allow multi-thread with lock
+                )
+                self._connection.row_factory = sqlite3.Row
+            return self._connection
+
+    def close(self):
+        """
+        Close the persistent database connection.
+
+        Call this for graceful shutdown. Connection will be reopened
+        automatically on next query if needed.
+        """
+        with self._lock:
+            if self._connection:
+                self._connection.close()
+                self._connection = None
 
     def query_tasks_by_date(
         self,
@@ -79,7 +109,7 @@ class TwosDatabase:
         # Parameterized query avoids SQL injection risks.
         cursor.execute(query, params)
         results = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        # Note: Connection is persistent, no need to close
 
         return results
 
@@ -118,12 +148,11 @@ class TwosDatabase:
             )
 
             results = [dict(row) for row in cursor.fetchall()]
-            conn.close()
+            # Note: Connection is persistent, no need to close
 
             return results
 
         except sqlite3.OperationalError as e:
-            conn.close()
             # FTS5 query syntax error - provide helpful error message
             raise ValueError(
                 f"Invalid FTS5 query syntax: {query}. "
@@ -142,6 +171,7 @@ class TwosDatabase:
         - timestamp, tags, people
         - is_completed
 
+        Results are cached for 15 minutes (default TTL) to speed up repeated queries.
         Use get_things_by_ids() to fetch full content for selected candidates.
 
         Args:
@@ -154,6 +184,11 @@ class TwosDatabase:
         Raises:
             ValueError: If the FTS5 query syntax is invalid
         """
+        # Check cache first
+        cached = self.cache.get(query, limit=limit)
+        if cached is not None:
+            return cached
+
         conn = self._get_connection()
         cursor = conn.cursor()
 
@@ -207,11 +242,12 @@ class TwosDatabase:
 
                 results.append(result)
 
-            conn.close()
+            # Cache the results
+            self.cache.set(query, results, limit=limit)
+
             return results
 
         except sqlite3.OperationalError as e:
-            conn.close()
             raise ValueError(
                 f"Invalid FTS5 query syntax: {query}. "
                 f"Error: {str(e)}. "
@@ -235,7 +271,7 @@ class TwosDatabase:
         row = cursor.fetchone()
 
         if row is None:
-            conn.close()
+            # Note: Connection is persistent, no need to close
             return None
 
         result = dict(row)
@@ -270,7 +306,7 @@ class TwosDatabase:
             {"text": row[0], "url": row[1]} for row in cursor.fetchall()
         ]
 
-        conn.close()
+        # Note: Connection is persistent, no need to close
         return result
 
     def get_things_by_ids(self, thing_ids: List[str]) -> List[Dict[str, Any]]:
@@ -325,7 +361,7 @@ class TwosDatabase:
         )
 
         results = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        # Note: Connection is persistent, no need to close
 
         return results
 
@@ -358,7 +394,7 @@ class TwosDatabase:
         )
 
         results = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        # Note: Connection is persistent, no need to close
 
         return results
 
@@ -389,7 +425,7 @@ class TwosDatabase:
         )
 
         results = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        # Note: Connection is persistent, no need to close
 
         return results
 
@@ -415,7 +451,7 @@ class TwosDatabase:
         )
 
         results = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        # Note: Connection is persistent, no need to close
 
         return results
 
@@ -459,7 +495,7 @@ class TwosDatabase:
         cursor.execute("SELECT COUNT(*) FROM links")
         stats["total_links"] = cursor.fetchone()[0]
 
-        conn.close()
+        # Note: Connection is persistent, no need to close
 
         return stats
 
@@ -469,7 +505,7 @@ class TwosDatabase:
 
         Returns:
             A dict containing the database path, total thing count,
-            and optional metadata like source file and last load time.
+            and optional metadata like source file and load time.
         """
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -490,5 +526,14 @@ class TwosDatabase:
             if key in metadata:
                 metadata[key] = value
 
-        conn.close()
+        # Note: Connection is persistent, no need to close
         return metadata
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """
+        Get query cache performance statistics.
+
+        Returns:
+            Dictionary with cache size, hit rate, and timing info
+        """
+        return self.cache.get_stats()
