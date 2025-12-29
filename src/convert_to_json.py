@@ -11,6 +11,7 @@ This script parses the Twos "Markdown with timestamps" export format and extract
 
 import re
 import json
+import sys
 from datetime import datetime
 from typing import Optional, List, Dict, Any, TypedDict
 from pathlib import Path
@@ -81,20 +82,144 @@ def extract_tags(text: str) -> List[str]:
     return [tag.lower() for tag in tags]
 
 
-def extract_people(text: str) -> List[str]:
-    """
-    Extract potential people names from text using improved heuristics.
+# Global spaCy model cache (loaded once, reused for all extractions)
+_SPACY_MODEL_CACHE = None
 
-    Strategy:
+
+def extract_people_ner(text: str) -> List[str]:
+    """
+    Extract people mentions using spaCy Named Entity Recognition.
+
+    Uses cached model to avoid reloading for every call.
+
+    Args:
+        text: Content to extract names from
+
+    Returns:
+        List of unique person names (PERSON entities)
+
+    Raises:
+        ImportError: If spaCy not available or model not downloaded
+    """
+    global _SPACY_MODEL_CACHE
+
+    import spacy
+
+    # Load model once and cache
+    if _SPACY_MODEL_CACHE is None:
+        try:
+            _SPACY_MODEL_CACHE = spacy.load("en_core_web_sm")
+        except OSError:
+            raise ImportError(
+                "spaCy model 'en_core_web_sm' not found. "
+                "Run: python -m spacy download en_core_web_sm"
+            )
+
+    nlp = _SPACY_MODEL_CACHE
+
+    if not text:
+        return []
+
+    # Run NER pipeline
+    doc = nlp(text)
+
+    # Extract PERSON entities
+    people = []
+    for ent in doc.ents:
+        if ent.label_ == "PERSON":
+            name = ent.text.strip()
+            # Skip single-character names (likely errors)
+            if len(name) > 1:
+                people.append(name)
+
+    return list(set(people))
+
+
+def extract_people_batch_ner(texts: List[str]) -> List[List[str]]:
+    """
+    Extract people from multiple texts in batch (faster than individual calls).
+
+    Args:
+        texts: List of content strings
+
+    Returns:
+        List of lists, each containing extracted names for corresponding text
+
+    Raises:
+        ImportError: If spaCy not available or model not downloaded
+    """
+    global _SPACY_MODEL_CACHE
+
+    import spacy
+
+    if _SPACY_MODEL_CACHE is None:
+        try:
+            _SPACY_MODEL_CACHE = spacy.load("en_core_web_sm")
+        except OSError:
+            raise ImportError(
+                "spaCy model 'en_core_web_sm' not found. "
+                "Run: python -m spacy download en_core_web_sm"
+            )
+
+    nlp = _SPACY_MODEL_CACHE
+
+    # Process texts in batch using nlp.pipe()
+    results = []
+
+    # nlp.pipe() is more efficient than individual nlp() calls
+    for doc in nlp.pipe(texts, batch_size=50):
+        people = []
+        for ent in doc.ents:
+            if ent.label_ == "PERSON":
+                name = ent.text.strip()
+                if len(name) > 1:
+                    people.append(name)
+        results.append(list(set(people)))
+
+    return results
+
+
+def extract_people(text: str, use_ner: bool = True) -> List[str]:
+    """
+    Extract people mentions from text.
+
+    Tries NER-based extraction first (if spaCy available), falls back to regex.
+
+    Strategy (NER mode):
+    - Use spaCy Named Entity Recognition to identify PERSON entities
+    - High accuracy, low false positive rate
+
+    Strategy (regex fallback mode):
     - Find capitalized words (proper nouns)
     - Filter out common non-name words
     - Look for possessive forms (Alex's, Mom's)
     - Normalize common variations (mom -> Mom)
 
+    Args:
+        text: Content to extract names from
+        use_ner: Whether to attempt NER extraction (default: True)
+
     Returns:
         A deduplicated list of likely person names. False positives are possible
-        because this is a simple heuristic, not a full NLP model.
+        in regex mode, but rare in NER mode.
     """
+    # Try NER extraction first if enabled
+    if use_ner:
+        try:
+            return extract_people_ner(text)
+        except ImportError as e:
+            # spaCy not installed or model not downloaded
+            print(
+                f"⚠️  spaCy NER not available ({e}), falling back to regex extraction",
+                file=sys.stderr,
+            )
+            print(
+                "💡 Tip: Install spaCy with: pip install spacy && python -m spacy download en_core_web_sm",
+                file=sys.stderr,
+            )
+            # Fall through to regex
+
+    # Regex-based extraction (fallback mode)
     people = []
 
     # Common stop words that are capitalized but not names.
@@ -434,12 +559,13 @@ def clean_content(content: str) -> str:
     return content.strip()
 
 
-def parse_twos_file(file_path: Path) -> Dict[str, Any]:
+def parse_twos_file(file_path: Path, use_ner: bool = True) -> Dict[str, Any]:
     """
     Parse Twos markdown file into structured data.
 
     Args:
         file_path: Path to the Twos export file (Markdown with timestamps format).
+        use_ner: Whether to use spaCy NER for people extraction (default: True)
 
     Returns:
         Dictionary with metadata and list of tasks
@@ -534,7 +660,7 @@ def parse_twos_file(file_path: Path) -> Dict[str, Any]:
                             "is_strikethrough": is_strikethrough(content_clean),
                             "links": extract_links(content_clean),
                             "tags": extract_tags(content_clean),
-                            "people_mentioned": extract_people(content_clean),
+                            "people_mentioned": [],  # Will be filled by batch processing
                         }
 
                         tasks.append(task)
@@ -550,6 +676,36 @@ def parse_twos_file(file_path: Path) -> Dict[str, Any]:
                         parent_stack.append({"id": task_id, "indent": indent_tabs})
 
                         task_id_counter += 1
+
+    # Batch extract people after all tasks parsed (if using NER)
+    if use_ner:
+        try:
+            # Extract all content texts
+            all_content = [task.get("content", "") for task in tasks]
+
+            # Batch process with NER
+            people_results = extract_people_batch_ner(all_content)
+
+            # Assign back to tasks
+            for task, people in zip(tasks, people_results):
+                task["people_mentioned"] = people
+
+        except ImportError:
+            # Fall back to regex for each task
+            print(
+                "⚠️  NER not available, using regex extraction for people",
+                file=sys.stderr,
+            )
+            for task in tasks:
+                task["people_mentioned"] = extract_people(
+                    task.get("content", ""), use_ner=False
+                )
+    else:
+        # Regex extraction (use_ner=False)
+        for task in tasks:
+            task["people_mentioned"] = extract_people(
+                task.get("content", ""), use_ner=False
+            )
 
     # Compute a date range summary for quick metadata inspection.
     timestamps: list[str] = []
@@ -588,6 +744,11 @@ def main():
     )
     parser.add_argument("-o", "--output", type=Path, help="Output JSON file path")
     parser.add_argument("--pretty", action="store_true", help="Pretty print JSON")
+    parser.add_argument(
+        "--no-ner",
+        action="store_true",
+        help="Disable NER extraction, use regex fallback (faster but less accurate)",
+    )
 
     args = parser.parse_args()
 
@@ -602,7 +763,7 @@ def main():
         output_path = args.input_file.with_suffix(".json")
 
     print(f"Parsing {args.input_file}...")
-    data = parse_twos_file(args.input_file)
+    data = parse_twos_file(args.input_file, use_ner=not args.no_ner)
 
     print(f"Found {data['metadata']['total_tasks']} tasks")
     print(

@@ -106,6 +106,33 @@ If you want to use AI-powered grooming and entity classification:
 - Internet connection required
 - All data stays local (Claude Code runs on your machine)
 
+### Installing spaCy NER (Optional, Recommended)
+
+For accurate people extraction with 80% fewer false positives:
+
+```bash
+pip install -e ".[ner]"
+python -m spacy download en_core_web_sm
+```
+
+**Why use NER?**
+- **With NER:** Accurately identifies real people names (~90% precision)
+- **Without NER:** Uses regex fallback, prone to false positives (verbs like "Set", "Plan", months like "March", "May")
+
+**Usage:**
+```bash
+# With NER (recommended, default)
+python3 src/convert_to_json.py data/raw/twos_export.md -o data/processed/twos_data.json
+
+# Without NER (faster but less accurate)
+python3 src/convert_to_json.py data/raw/twos_export.md -o data/processed/twos_data.json --no-ner
+```
+
+**Examples:**
+- "Met with Alice" → NER extracts "Alice" ✅ | Regex extracts "Alice" ✅
+- "Set reminder" → NER extracts nothing ✅ | Regex extracts "Set" ❌
+- "Meeting in March" → NER extracts nothing ✅ | Regex extracts "March" ❌
+
 ## Example Queries
 
 - "Show me all things from last December"

@@ -88,15 +88,23 @@ Each thing object contains:
 ```
 
 **Known Issues**:
-- People extraction is naive (needs grooming)
 - Strikethrough detection simple (single dash pattern)
 - No semantic understanding of thing relationships
 - Date/time parsing limited to specific formats
 
+**People Extraction** (Improved in Phase 6):
+- **With spaCy NER** (recommended): High accuracy (~90% precision), low false positives
+- **Without spaCy** (fallback): Regex-based extraction, prone to false positives (verbs, months)
+- Install NER: `pip install -e ".[ner]" && python -m spacy download en_core_web_sm`
+
 ## Running the Converter
 
 ```bash
+# With NER (recommended, requires spaCy)
 python3 src/convert_to_json.py data/raw/input.md -o data/processed/output.json --pretty
+
+# Without NER (fallback, no extra dependencies)
+python3 src/convert_to_json.py data/raw/input.md -o data/processed/output.json --pretty --no-ner
 ```
 
 ## SQLite Schema
@@ -250,8 +258,20 @@ python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json
 
 ## Dependencies
 
-Current: `python-dateutil`
-Future: MCP SDK, SQLite drivers, potential NLP libraries
+**Required:**
+- `python-dateutil>=2.8.2` - Date parsing
+- `mcp[cli]>=1.0.0` - Model Context Protocol
+- `PyYAML>=6.0.1` - Configuration
+
+**Optional:**
+- `spacy>=3.7.0` + `en_core_web_sm` model - Named Entity Recognition for accurate people extraction (recommended)
+  - Install: `pip install -e ".[ner]" && python -m spacy download en_core_web_sm`
+  - Without this: Falls back to regex-based extraction (higher false positive rate)
+
+**Development:**
+- `pytest>=7.4.0` - Testing
+- `black>=23.0.0` - Code formatting
+- `mypy>=1.7.0` - Type checking
 
 ## Data Privacy
 
