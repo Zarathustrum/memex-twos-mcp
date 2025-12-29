@@ -120,8 +120,16 @@ def extract_people_ner(text: str) -> List[str]:
     if not text:
         return []
 
+    # Strip tags before NER for better accuracy
+    # Tags like #personal# interfere with spaCy's context analysis
+    text_clean = re.sub(r"#\w+#", "", text)
+    text_clean = " ".join(text_clean.split())
+
+    if not text_clean:
+        return []
+
     # Run NER pipeline
-    doc = nlp(text)
+    doc = nlp(text_clean)
 
     # Extract PERSON entities
     people = []
@@ -473,6 +481,30 @@ def extract_people(text: str, use_ner: bool = True) -> List[str]:
     return list(set(people))
 
 
+def strip_tags_for_ner(text: str) -> str:
+    """
+    Strip #tags# from text before NER processing.
+
+    Tags like #personal# can interfere with spaCy's context analysis,
+    reducing NER accuracy. This function removes them while preserving
+    the rest of the text.
+
+    Args:
+        text: Content with potential #tags#
+
+    Returns:
+        Text with tags removed
+
+    Example:
+        >>> strip_tags_for_ner("Send card to Jennifer #personal#")
+        'Send card to Jennifer'
+    """
+    # Remove #tag# patterns
+    text_no_tags = re.sub(r"#\w+#", "", text)
+    # Clean up extra whitespace
+    return " ".join(text_no_tags.split())
+
+
 def is_completed(content: str) -> bool:
     """
     Check if task is marked as completed via a checked Markdown checkbox.
@@ -680,8 +712,11 @@ def parse_twos_file(file_path: Path, use_ner: bool = True) -> Dict[str, Any]:
     # Batch extract people after all tasks parsed (if using NER)
     if use_ner:
         try:
-            # Extract all content texts
-            all_content = [task.get("content", "") for task in tasks]
+            # Extract all content texts and strip tags for better NER accuracy
+            # Tags like #personal# interfere with spaCy's context analysis
+            all_content = [
+                strip_tags_for_ner(task.get("content", "")) for task in tasks
+            ]
 
             # Batch process with NER
             people_results = extract_people_batch_ner(all_content)

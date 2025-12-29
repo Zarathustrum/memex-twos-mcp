@@ -124,6 +124,16 @@ class TestPeopleExtractionNER:
         except ImportError:
             pytest.skip("spaCy not installed")
 
+    def test_tags_stripped_before_ner(self):
+        """Verify that #tags# are stripped before NER processing."""
+        try:
+            # This was the bug: tags interfered with NER context
+            result = extract_people_ner("Send birthday card to Jennifer #personal#")
+            # After fix: should extract Jennifer
+            assert "Jennifer" in result
+        except ImportError:
+            pytest.skip("spaCy not installed")
+
 
 class TestPeopleExtractionBatchNER:
     """Test batch NER processing."""
