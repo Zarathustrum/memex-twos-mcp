@@ -8,6 +8,12 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+try:
+    import sqlite_vec
+    SQLITE_VEC_AVAILABLE = True
+except ImportError:
+    SQLITE_VEC_AVAILABLE = False
+
 from .cache import QueryCache
 
 
@@ -35,6 +41,19 @@ class TwosDatabase:
 
         # Query result cache
         self.cache = QueryCache(ttl_seconds=cache_ttl_seconds)
+
+        # Initialize embedding generator (graceful degradation)
+        self.embeddings_enabled = False
+        self.embedding_gen = None
+        try:
+            from .embeddings import EmbeddingGenerator
+            self.embedding_gen = EmbeddingGenerator()
+            if self.embedding_gen.available:
+                self.embeddings_enabled = True
+                # Initialize vector search extension
+                self._init_vector_search()
+        except Exception as e:
+            print(f"⚠️  Embeddings disabled: {e}")
 
     def _get_connection(self) -> sqlite3.Connection:
         """
@@ -68,6 +87,32 @@ class TwosDatabase:
             if self._connection:
                 self._connection.close()
                 self._connection = None
+
+    def _init_vector_search(self):
+        """Initialize sqlite-vec extension for vector similarity search."""
+        if not SQLITE_VEC_AVAILABLE:
+            print("⚠️  sqlite-vec not installed. Vector search unavailable.")
+            self.embeddings_enabled = False
+            return
+
+        conn = self._get_connection()
+
+        try:
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+
+            # Create virtual table for vector search
+            conn.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS vec_index USING vec0(
+                    thing_id TEXT PRIMARY KEY,
+                    embedding float[384]
+                )
+            """)
+            conn.commit()
+        except Exception as e:
+            print(f"⚠️  Vector search unavailable: {e}")
+            self.embeddings_enabled = False
 
     def query_tasks_by_date(
         self,
@@ -638,3 +683,117 @@ class TwosDatabase:
             Dictionary with cache size, hit rate, and timing info
         """
         return self.cache.get_stats()
+
+    def hybrid_search(
+        self,
+        query: str,
+        limit: int = 50,
+        lexical_weight: float = 0.5,
+        semantic_weight: float = 0.5,
+        rrf_k: int = 60,
+        enable_semantic: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Hybrid search combining BM25 (lexical) + vector similarity (semantic).
+
+        Uses Reciprocal Rank Fusion (RRF) to merge rankings:
+            RRF_score(doc) = sum over all rankings ( weight / (k + rank) )
+
+        Args:
+            query: Search query text
+            limit: Number of results to return
+            lexical_weight: Weight for BM25 scores (0-1)
+            semantic_weight: Weight for vector similarity (0-1)
+            rrf_k: RRF constant (default 60 per literature)
+            enable_semantic: If False, fall back to lexical-only
+
+        Returns:
+            List of candidate dictionaries with hybrid_score field
+        """
+        # Phase 1: BM25 lexical search
+        lexical_results = self.search_candidates(query, limit=limit*2)
+
+        # Phase 2: Vector semantic search (if enabled)
+        if enable_semantic and self.embeddings_enabled:
+            try:
+                semantic_results = self._vector_search(query, limit=limit*2)
+            except Exception as e:
+                print(f"⚠️  Semantic search failed, falling back to lexical: {e}")
+                semantic_results = []
+        else:
+            semantic_results = []
+
+        # Phase 3: Reciprocal Rank Fusion
+        thing_scores: Dict[str, float] = {}
+        thing_data: Dict[str, Dict] = {}
+
+        # Add lexical scores
+        for rank, result in enumerate(lexical_results, start=1):
+            thing_id = result['id']
+            thing_scores[thing_id] = lexical_weight / (rrf_k + rank)
+            thing_data[thing_id] = result
+
+        # Add semantic scores
+        for rank, result in enumerate(semantic_results, start=1):
+            thing_id = result['id']
+            thing_scores[thing_id] = thing_scores.get(thing_id, 0) + (
+                semantic_weight / (rrf_k + rank)
+            )
+            if thing_id not in thing_data:
+                thing_data[thing_id] = result
+
+        # Sort by combined score and return top N
+        ranked = sorted(thing_scores.items(), key=lambda x: x[1], reverse=True)[:limit]
+
+        results = []
+        for thing_id, hybrid_score in ranked:
+            result = thing_data[thing_id].copy()
+            result['hybrid_score'] = hybrid_score
+            results.append(result)
+
+        return results
+
+    def _vector_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
+        """
+        Vector similarity search using cosine similarity.
+
+        Args:
+            query: Search query text
+            limit: Number of results
+
+        Returns:
+            List of candidates with cosine_similarity scores
+        """
+        if not self.embeddings_enabled or self.embedding_gen is None:
+            raise RuntimeError("Embeddings not available")
+
+        # Generate query embedding
+        query_embedding = self.embedding_gen.encode_single(query)
+
+        # Search using sqlite-vec
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Convert embedding to bytes for SQLite storage
+        embedding_bytes = query_embedding.tobytes()
+
+        cursor.execute("""
+            SELECT
+                v.thing_id,
+                vec_distance_cosine(v.embedding, ?) AS distance
+            FROM vec_index v
+            ORDER BY distance ASC
+            LIMIT ?
+        """, (embedding_bytes, limit))
+
+        # Fetch thing metadata for results
+        results = []
+        for row in cursor.fetchall():
+            thing_id, distance = row
+            thing = self.get_thing_by_id(thing_id)
+            if thing:
+                # Convert distance to similarity (cosine distance = 1 - similarity)
+                thing['cosine_similarity'] = 1 - distance
+                results.append(thing)
+
+        return results

@@ -8,10 +8,12 @@ This script:
 - Populates normalized entity tables (people, tags, links)
 - Creates relationships via junction tables
 - Populates FTS index
+- Generates embeddings for semantic search (optional)
 """
 
 import json
 import sqlite3
+import os
 from pathlib import Path
 from datetime import datetime
 import argparse
@@ -316,6 +318,112 @@ def update_metadata(
     print("Metadata updated")
 
 
+def generate_embeddings(
+    conn: sqlite3.Connection,
+    tasks: list,
+    batch_size: int = 64,
+    show_progress: bool = True
+) -> None:
+    """
+    Generate and store embeddings for all things.
+
+    Args:
+        conn: Open SQLite connection
+        tasks: List of thing dictionaries
+        batch_size: Batch size for encoding
+        show_progress: Show progress bar
+
+    Returns:
+        None
+    """
+    print(f"\n📊 Generating embeddings for {len(tasks)} things...")
+
+    # Check if user wants embeddings (environment variable)
+    if os.getenv('MEMEX_DISABLE_EMBEDDINGS') == '1':
+        print("⚠️  Embeddings disabled via MEMEX_DISABLE_EMBEDDINGS=1")
+        return
+
+    try:
+        import sys
+        # Add src to path for imports
+        sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+        from memex_twos_mcp.embeddings import EmbeddingGenerator
+        import numpy as np
+
+        # Also need sqlite_vec for vec_index
+        try:
+            import sqlite_vec
+        except ImportError:
+            print("⚠️  sqlite-vec not installed, skipping embeddings")
+            print("   Install with: pip install sqlite-vec")
+            return
+
+        embedding_gen = EmbeddingGenerator()
+        if not embedding_gen.available:
+            print("⚠️  Embedding model unavailable, skipping")
+            print("   Install with: pip install sentence-transformers")
+            return
+    except Exception as e:
+        print(f"⚠️  Could not initialize embeddings: {e}")
+        print("   Skipping embedding generation. Set MEMEX_DISABLE_EMBEDDINGS=1 to silence.")
+        return
+
+    # Initialize sqlite-vec extension
+    try:
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
+
+        # Create vec_index virtual table
+        conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_index USING vec0(
+                thing_id TEXT PRIMARY KEY,
+                embedding float[384]
+            )
+        """)
+        conn.commit()
+    except Exception as e:
+        print(f"⚠️  Could not initialize vector search: {e}")
+        return
+
+    # Prepare texts (use content field)
+    texts = [task.get('content', '') for task in tasks]
+    thing_ids = [task['id'] for task in tasks]
+
+    # Generate embeddings in batches
+    try:
+        embeddings = embedding_gen.encode_batch(
+            texts,
+            batch_size=batch_size,
+            show_progress=show_progress
+        )
+    except Exception as e:
+        print(f"⚠️  Embedding generation failed: {e}")
+        return
+
+    # Store in database
+    cursor = conn.cursor()
+    print(f"  Storing embeddings...")
+    for thing_id, embedding in zip(thing_ids, embeddings):
+        # Serialize as float32 bytes for thing_embeddings table
+        embedding_blob = embedding.astype(np.float32).tobytes()
+
+        cursor.execute("""
+            INSERT INTO thing_embeddings (thing_id, embedding, model_version)
+            VALUES (?, ?, ?)
+        """, (thing_id, embedding_blob, embedding_gen.model_name))
+
+        # Also insert into vec_index for fast search
+        # vec_index expects the raw bytes directly
+        cursor.execute("""
+            INSERT INTO vec_index (thing_id, embedding)
+            VALUES (?, ?)
+        """, (thing_id, embedding_blob))
+
+    conn.commit()
+    print(f"✅ Generated and stored {len(embeddings)} embeddings")
+
+
 def validate_database(conn: sqlite3.Connection):
     """
     Run validation queries on the loaded database.
@@ -465,6 +573,10 @@ def main():
         load_people(conn, tasks)
         load_tags(conn, tasks)
         load_links(conn, tasks)
+
+        # Generate embeddings for semantic search
+        generate_embeddings(conn, tasks)
+
         update_metadata(
             conn,
             metadata.get("source_file"),

@@ -117,6 +117,8 @@ Current tables:
 - `thing_people` (thing-person relationships)
 - `thing_tags` (thing-tag relationships)
 - `things_fts` (FTS5 search)
+- `thing_embeddings` (semantic embeddings, Phase 4)
+- `vec_index` (vector similarity search, Phase 4)
 
 ## MCP Server Design (Planned)
 
@@ -127,7 +129,8 @@ Current tables:
 
 **Tools**:
 - `query_things_by_date(start_date, end_date, filters)` - Basic queries
-- `search_things(query)` - Full-text search
+- `search_things(query)` - Full-text search (BM25)
+- `hybrid_search(query)` - Hybrid lexical + semantic search (Phase 4)
 - `get_person_things(person_name)` - Things mentioning a person
 - `get_tag_things(tag_name)` - Things with a tag
 - `get_things_stats()` - Database statistics
@@ -135,6 +138,58 @@ Current tables:
 **Prompts**:
 - Life narrative generation templates
 - Analysis prompt templates
+
+## Hybrid Search (Phase 4)
+
+**Overview:**
+Combines lexical (BM25) and semantic (vector) search using Reciprocal Rank Fusion (RRF) for better conceptual query matching.
+
+**Use Cases:**
+- **Lexical search** (search_things): Exact keyword matching - "doctor appointment" finds "doctor" and "appointment"
+- **Hybrid search** (hybrid_search): Semantic understanding - "medical checkup" finds "doctor", "dentist", "physician", etc.
+
+**Dependencies:**
+- sentence-transformers (embedding model)
+- sqlite-vec (vector similarity search)
+- numpy (vector operations)
+
+**Installation:**
+```bash
+pip install sentence-transformers sqlite-vec numpy
+
+# Download embedding model (~90MB)
+python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+```
+
+**Usage:**
+```bash
+# Load data with embeddings (default)
+python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json
+
+# Disable embeddings (faster loading, lexical-only)
+MEMEX_DISABLE_EMBEDDINGS=1 python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json
+
+# Migrate existing database
+python3 scripts/migrate_add_embeddings.py data/processed/twos.db
+```
+
+**How It Works:**
+1. Generates 384-dimensional embeddings for all thing content using all-MiniLM-L6-v2
+2. Stores embeddings in `thing_embeddings` table and `vec_index` virtual table
+3. During hybrid_search:
+   - Phase 1: BM25 lexical search for keyword matches
+   - Phase 2: Vector similarity search for semantic matches
+   - Phase 3: Reciprocal Rank Fusion (RRF) merges rankings with configurable weights
+
+**Performance:**
+- Embedding generation: ~10K things in <30 seconds (CPU)
+- Hybrid search: <200ms median (10K things)
+- Storage overhead: ~1.5KB per thing (~15MB for 10K things)
+
+**Graceful Degradation:**
+- If embeddings unavailable: Falls back to lexical-only search
+- If sqlite-vec unavailable: Hybrid search disabled, lexical search still works
+- All existing tools continue to work without embeddings
 
 ## Development Workflow
 

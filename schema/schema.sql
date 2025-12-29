@@ -129,6 +129,24 @@ CREATE TRIGGER IF NOT EXISTS things_au AFTER UPDATE ON things BEGIN
 END;
 
 -- ============================================================================
+-- Embeddings for Semantic Search (Phase 4)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS thing_embeddings (
+    thing_id TEXT PRIMARY KEY,
+    embedding BLOB NOT NULL,
+    model_version TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (thing_id) REFERENCES things(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_embeddings_thing ON thing_embeddings(thing_id);
+
+-- Note: vec_index virtual table is created at runtime by sqlite-vec
+-- It requires loading the extension dynamically and cannot be created in static schema
+-- See database.py _init_vector_search() for runtime initialization
+
+-- ============================================================================
 -- Metadata Table (for versioning and stats)
 -- ============================================================================
 

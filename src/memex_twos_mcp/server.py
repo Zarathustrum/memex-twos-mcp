@@ -289,6 +289,40 @@ async def list_tools() -> list[Tool]:
             ),
             inputSchema={"type": "object", "properties": {}},
         ),
+        Tool(
+            name="hybrid_search",
+            description=(
+                "Hybrid search combining lexical (BM25) and semantic (vector) search. "
+                "Better for conceptual queries like 'moving house', 'health issues'. "
+                "Returns results ranked by combined lexical + semantic relevance. "
+                "Falls back to lexical-only if embeddings unavailable."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (natural language or keywords)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 50)",
+                        "default": 50
+                    },
+                    "lexical_weight": {
+                        "type": "number",
+                        "description": "Weight for BM25 scores (0-1, default: 0.5)",
+                        "default": 0.5
+                    },
+                    "semantic_weight": {
+                        "type": "number",
+                        "description": "Weight for semantic scores (0-1, default: 0.5)",
+                        "default": 0.5
+                    }
+                },
+                "required": ["query"]
+            }
+        ),
     ]
 
 
@@ -422,6 +456,21 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     elif name == "get_cache_stats":
         stats = database.get_cache_stats()
         return [TextContent(type="text", text=json.dumps(stats, indent=2, default=str))]
+
+    elif name == "hybrid_search":
+        query = arguments["query"]
+        limit = arguments.get("limit", 50)
+        lexical_weight = arguments.get("lexical_weight", 0.5)
+        semantic_weight = arguments.get("semantic_weight", 0.5)
+
+        results = database.hybrid_search(
+            query,
+            limit=limit,
+            lexical_weight=lexical_weight,
+            semantic_weight=semantic_weight
+        )
+
+        return [TextContent(type="text", text=json.dumps(results, indent=2, default=str))]
 
     else:
         raise ValueError(f"Unknown tool: {name}")
