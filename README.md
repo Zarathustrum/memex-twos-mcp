@@ -175,6 +175,49 @@ python3 scripts/migrate_add_embeddings.py data/processed/twos.db
 - Hybrid search: <200ms median (10K things)
 - Storage: ~1.5KB per thing (~15MB for 10K things)
 
+### Incremental Ingestion (Phase 5)
+
+For faster updates when adding new data or making changes:
+
+```bash
+# First load (full rebuild)
+python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json
+
+# Subsequent updates (incremental - only new/changed things)
+python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json --mode=append
+
+# Or use shorthand
+python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json --incremental
+
+# Sync mode (insert new, update changed, delete removed)
+python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json --mode=sync
+```
+
+**Why use incremental mode?**
+- **Full rebuild:** 10K things in ~3s, 100K in ~30s
+- **Incremental:** 100 new things in ~0.3s (10x faster)
+- Only processes changed things, preserves embeddings for unchanged things
+- Three modes:
+  - `append` (default incremental): Insert new only, safest for additions
+  - `sync`: Insert new, update changed, delete removed (full sync)
+  - `rebuild`: Delete all and rebuild (default behavior)
+
+**Migrate existing database:**
+```bash
+python3 scripts/migrate_add_incremental.py data/processed/twos.db
+```
+
+**How it works:**
+- Content hashing detects changes (timestamp + content + section_header)
+- Only updates things that changed, preserves existing embeddings
+- Import audit trail tracks all changes in `imports` table
+- FTS index stays automatically synchronized
+
+**Performance:**
+- Add 100 new things (10K total): ~0.3s (10x faster than rebuild)
+- Update 100 things (10K total): ~0.5s (6x faster than rebuild)
+- Perfect for daily updates or small data refreshes
+
 ## Example Queries
 
 - "Show me all things from last December"

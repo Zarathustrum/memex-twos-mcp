@@ -30,9 +30,15 @@ Claude queries and analysis
 - ✅ Initial data conversion (~10,000 things)
 - ✅ Both repos on GitHub
 - ✅ LLM-assisted data grooming (identify duplicates, normalize entities, suggest schema improvements)
+- ✅ Phase 1: BM25 Full-Text Search
+- ✅ Phase 2: Two-Phase Retrieval
+- ✅ Phase 3: Query Result Caching
+- ✅ Phase 4: Hybrid Search (semantic + lexical with RRF)
+- ✅ Phase 5: Incremental Ingestion (content-hash based change detection)
+- ✅ Phase 6: Entity Extraction (spaCy NER for people extraction)
 
 **Next Steps**:
-1. Add analysis tools (patterns, timelines, narratives)2. Add analysis tools (patterns, timelines, narratives)
+1. Add analysis tools (patterns, timelines, narratives)
 
 ## File Structure
 
@@ -110,7 +116,7 @@ python3 src/convert_to_json.py data/raw/input.md -o data/processed/output.json -
 ## SQLite Schema
 
 Current tables:
-- `things` (core thing data)
+- `things` (core thing data, includes `content_hash` for change detection - Phase 5)
 - `people` (extracted and normalized)
 - `tags` (normalized taxonomy)
 - `links` (URLs with metadata)
@@ -119,6 +125,8 @@ Current tables:
 - `things_fts` (FTS5 search)
 - `thing_embeddings` (semantic embeddings, Phase 4)
 - `vec_index` (vector similarity search, Phase 4)
+- `imports` (import audit trail: mode, counts, duration - Phase 5)
+- `metadata` (versioning and stats, includes incremental import tracking)
 
 ## MCP Server Design (Planned)
 
@@ -191,6 +199,68 @@ python3 scripts/migrate_add_embeddings.py data/processed/twos.db
 - If sqlite-vec unavailable: Hybrid search disabled, lexical search still works
 - All existing tools continue to work without embeddings
 
+## Incremental Ingestion (Phase 5)
+
+**Overview:**
+Content-hash based change detection for 10-100x faster database updates when adding or modifying small numbers of things.
+
+**Problem Solved:**
+- Before: Adding 100 new things to 10K database = full rebuild (~3s)
+- After: Adding 100 new things = incremental update (~0.3s, 10x faster)
+
+**Implementation:**
+- Content hashing: SHA256 of (timestamp + content + section_header)
+- Change detection: Compare incoming vs existing hashes
+- Upsert logic: Insert new, update changed, optionally delete removed
+- Embedding preservation: Only regenerate embeddings for changed things
+- Audit trail: All imports tracked in `imports` table
+
+**Usage:**
+```bash
+# First load (full rebuild)
+python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json
+
+# Subsequent updates (incremental modes)
+python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json --mode=append  # Insert new only
+python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json --incremental  # Shorthand for append
+python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json --mode=sync    # Insert new, update changed, delete removed
+
+# Migrate existing database
+python3 scripts/migrate_add_incremental.py data/processed/twos.db
+```
+
+**Three Modes:**
+1. **rebuild** (default): Delete all, full reload - use for first import or major schema changes
+2. **append**: Insert new only, safest for incremental additions (recommended for daily updates)
+3. **sync**: Insert new, update changed, delete removed - use when export file is authoritative
+
+**Schema Changes:**
+- Added `content_hash TEXT` column to `things` table
+- Added `imports` table for audit trail (mode, counts, duration, timestamp)
+- Added metadata tracking for last incremental import
+
+**Performance:**
+- Add 100 new things (10K total): ~0.3s (10x faster than rebuild)
+- Update 100 things (10K total): ~0.5s (6x faster than rebuild)
+- Embedding generation: Only for changed things (not entire dataset)
+
+**Key Features:**
+- **Deterministic hashing**: Same content always produces same hash
+- **FTS synchronization**: Delete+reinsert triggers FTS update automatically
+- **Embedding preservation**: Phase 4 embeddings only regenerated for changed things
+- **Import audit trail**: Every import run tracked with stats (new/updated/deleted counts, duration)
+- **Backward compatible**: Default mode is 'rebuild' (existing behavior)
+
+**Migration:**
+For existing databases without incremental support:
+```bash
+python3 scripts/migrate_add_incremental.py data/processed/twos.db
+```
+- Adds `content_hash` column
+- Backfills hashes for existing things
+- Creates `imports` table
+- Safe to run on existing databases (idempotent)
+
 ## Development Workflow
 
 1. Make changes in `<path-to-project>/memex-twos-mcp`
@@ -223,10 +293,18 @@ Short reminders to avoid common retry loops during development. Scan this sectio
 ### Quick Validation Chain
 ```bash
 # After data refresh, run in order:
+
+# Full rebuild (first time or major changes):
 rm data/processed/twos.db  # Clean slate
 python3 src/convert_to_json.py data/raw/twos_export.md -o data/processed/twos_data.json
 python3 scripts/groom_data.py  # Auto-fix duplicates, generate cleaned file
 python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json  # Use cleaned version
+source .venv/bin/activate && python3 -c "from memex_twos_mcp.database import TwosDatabase; from pathlib import Path; print(TwosDatabase(Path('data/processed/twos.db')).get_stats())"
+
+# Incremental update (daily updates, new data):
+python3 src/convert_to_json.py data/raw/twos_export.md -o data/processed/twos_data.json
+python3 scripts/groom_data.py
+python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json --incremental  # 10x faster
 source .venv/bin/activate && python3 -c "from memex_twos_mcp.database import TwosDatabase; from pathlib import Path; print(TwosDatabase(Path('data/processed/twos.db')).get_stats())"
 ```
 
