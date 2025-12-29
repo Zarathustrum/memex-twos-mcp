@@ -13,6 +13,7 @@ import json
 import os
 import shlex
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from memex_twos_mcp.config import get_config
@@ -144,6 +145,28 @@ def write_config(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def backup_config(path: Path) -> Path | None:
+    """
+    Create timestamped backup of existing config file.
+
+    Args:
+        path: Path to the config file to back up.
+
+    Returns:
+        Path to the backup file if created, None if original doesn't exist.
+    """
+    if not path.exists():
+        return None
+
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    backup_name = f"{path.stem}.backup.{timestamp}{path.suffix}"
+    backup_path = path.parent / backup_name
+
+    # Copy existing config to backup
+    backup_path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    return backup_path
+
+
 def main() -> None:
     """
     Generate or update Claude Desktop config.
@@ -173,15 +196,20 @@ def main() -> None:
 
     use_wsl_command = _is_wsl() and target_path.parts[:3] == ("/", "mnt", "c")
     server_config = build_server_config(use_wsl_command)
-    data["mcpServers"]["memex-twos"] = server_config
+    data["mcpServers"]["memex-twos-v2"] = server_config
 
     if target_path.exists():
         response = (
-            input("Update existing config with memex-twos? (y/n): ").strip().lower()
+            input("Update existing config with memex-twos-v2? (y/n): ").strip().lower()
         )
         if response != "y":
             print("SKIP: No changes written")
             return
+
+    # Backup existing config before modification
+    backup_path = backup_config(target_path)
+    if backup_path:
+        print(f"Backup created: {backup_path}")
 
     # I/O boundary: write the updated config back to disk.
     write_config(target_path, data)

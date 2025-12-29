@@ -124,7 +124,7 @@ npx @modelcontextprotocol/inspector
 ```json
 {
   "mcpServers": {
-    "memex-twos": {
+    "memex-twos-v2": {
       "command": "python",
       "args": [
         "-m",

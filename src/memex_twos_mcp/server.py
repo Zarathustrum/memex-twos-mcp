@@ -21,7 +21,7 @@ from .database import TwosDatabase
 
 
 # Initialize the MCP server with a stable name used by clients.
-app = Server("memex-twos-mcp")
+app = Server("memex-twos-mcp-v2")
 
 # Database instance (initialized in main and used by request handlers).
 db: TwosDatabase | None = None
