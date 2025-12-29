@@ -196,7 +196,8 @@ def generate_entity_summary(entities: Dict[str, Any], limit: int = 50) -> str:
 
 def invoke_claude_classification(
     entities: Dict[str, Any],
-    output_path: Path
+    output_path: Path,
+    timeout_seconds: int = 900
 ) -> bool:
     """
     Invoke Claude Code to classify entities and generate mapping file.
@@ -204,12 +205,15 @@ def invoke_claude_classification(
     Args:
         entities: Entity extraction results from extract_entities().
         output_path: Path where the mapping JSON should be written.
+        timeout_seconds: Timeout in seconds for Claude Code (default: 900 = 15 minutes).
 
     Returns:
         True if classification succeeded and mapping file was created.
     """
     print("\n🤖 Invoking Claude Code for entity classification...")
     print("   (This will use your subscription quota)")
+    print(f"   ⏱️  Timeout: {timeout_seconds} seconds ({timeout_seconds//60} minutes)")
+    print("   💭 Classifying ~3K entities may take several minutes - please wait...")
 
     # Prepare entity lists for Claude
     people_list = [{"name": person, "count": count}
@@ -290,11 +294,12 @@ Execute this task now without asking for confirmation. Write the complete mappin
             ],
             capture_output=True,
             text=True,
-            timeout=300,  # 5 minute timeout
+            timeout=timeout_seconds,
             stdin=subprocess.DEVNULL  # Signal no input coming
         )
     except subprocess.TimeoutExpired:
-        print("❌ Claude Code timed out after 5 minutes")
+        print(f"❌ Claude Code timed out after {timeout_seconds} seconds ({timeout_seconds//60} minutes)")
+        print(f"   💡 Tip: Increase timeout with --ai-timeout {timeout_seconds * 2}")
         return False
 
     if result.returncode != 0:
@@ -404,8 +409,11 @@ Examples:
   # Extract entities and show summary
   python3 scripts/classify_entities.py
 
-  # Extract and classify using AI
+  # Extract and classify using AI (15 min timeout)
   python3 scripts/classify_entities.py --ai-classify
+
+  # AI classification with longer timeout for large datasets
+  python3 scripts/classify_entities.py --ai-classify --ai-timeout 1800
 
   # Apply existing mappings
   python3 scripts/classify_entities.py --apply-mappings
@@ -436,6 +444,12 @@ Examples:
         type=int,
         default=50,
         help="Number of entities to show in summary report (default: 50)"
+    )
+    parser.add_argument(
+        "--ai-timeout",
+        type=int,
+        default=900,
+        help="Timeout in seconds for AI classification (default: 900 = 15 minutes)"
     )
 
     args = parser.parse_args()
@@ -477,7 +491,7 @@ Examples:
     mappings_path = Path("data/processed/entity_mappings.json")
 
     if args.ai_classify:
-        success = invoke_claude_classification(entities, mappings_path)
+        success = invoke_claude_classification(entities, mappings_path, args.ai_timeout)
         if not success:
             print("\n⚠️  AI classification failed")
             sys.exit(1)
