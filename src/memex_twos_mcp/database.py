@@ -123,7 +123,7 @@ class TwosDatabase:
         Query things within a date range and return minimal candidate previews.
 
         This returns only essential fields for LLM preview (two-phase retrieval):
-        - id, timestamp, is_completed
+        - id, timestamp, is_completed, is_strikethrough, is_pending
         - content_preview (truncated to 100 chars)
         - tags, people
 
@@ -155,6 +155,8 @@ class TwosDatabase:
                 id,
                 timestamp,
                 is_completed,
+                is_strikethrough,
+                is_pending,
                 SUBSTR(content, 1, 100) AS content_preview
             FROM things
             WHERE 1=1
@@ -266,7 +268,7 @@ class TwosDatabase:
         This returns only essential fields for LLM preview:
         - id, relevance_score, snippet
         - timestamp, tags, people
-        - is_completed
+        - is_completed, is_strikethrough, is_pending
 
         Results are cached for 15 minutes (default TTL) to speed up repeated queries.
         Use get_things_by_ids() to fetch full content for selected candidates.
@@ -298,7 +300,9 @@ class TwosDatabase:
                     bm25(things_fts) AS relevance_score,
                     snippet(things_fts, 1, '<b>', '</b>', '...', 32) AS snippet,
                     t.timestamp,
-                    t.is_completed
+                    t.is_completed,
+                    t.is_strikethrough,
+                    t.is_pending
                 FROM things t
                 JOIN things_fts fts ON t.id = fts.thing_id
                 WHERE things_fts MATCH ?

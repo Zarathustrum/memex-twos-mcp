@@ -295,7 +295,7 @@ def test_search_candidates(tmp_path: Path) -> None:
     candidate = candidates[0]
 
     # Verify minimal fields are present
-    required_fields = ["id", "relevance_score", "snippet", "timestamp", "is_completed", "tags", "people"]
+    required_fields = ["id", "relevance_score", "snippet", "timestamp", "is_completed", "is_strikethrough", "is_pending", "tags", "people"]
     for field in required_fields:
         assert field in candidate, f"Missing required field: {field}"
 
@@ -503,6 +503,8 @@ def test_query_tasks_by_date_candidates(tmp_path: Path) -> None:
         assert "id" in candidate
         assert "timestamp" in candidate
         assert "is_completed" in candidate
+        assert "is_strikethrough" in candidate
+        assert "is_pending" in candidate
         assert "content_preview" in candidate
         assert "tags" in candidate
         assert "people" in candidate

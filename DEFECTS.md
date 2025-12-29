@@ -14,6 +14,105 @@
 
 ## Fixed Defects
 
+### DEF-0002: Candidate methods missing critical is_strikethrough field ✅ FIXED
+
+**Severity:** P0-Critical
+**Status:** Fixed & Tested
+**Phase:** P2-Retrieval (incomplete implementation of DEF-0001)
+**Reported:** 2025-12-29 (User testing)
+**Fixed:** 2025-12-29
+
+**Repro Steps:**
+1. Query November 2025 items: `query_things_by_date(start_date=2025-11-01, end_date=2025-11-30)`
+2. Ask Claude: "How many things did I cross off in November?"
+3. Claude interprets "cross off" as strikethrough items
+4. Observe that `is_strikethrough` field is missing from results
+5. Query returns 0 because it can only check `is_completed`
+
+**Expected Behavior:**
+- Candidate methods return essential status fields: `is_completed`, `is_strikethrough`, `is_pending`
+- Claude can filter by strikethrough status without fetching full records
+- Fits user mental model: "cross off" = strikethrough in Twos
+
+**Actual Behavior:**
+- `query_tasks_by_date_candidates()` only returned: id, timestamp, is_completed, content_preview, tags, people
+- `search_candidates()` only returned: id, relevance_score, snippet, timestamp, is_completed, tags, people
+- Missing: `is_strikethrough` and `is_pending`
+- User has 205 strikethrough items in November 2025, but queries returned 0
+
+**Root Cause:**
+- **Files:** `src/memex_twos_mcp/database.py:153-160, 296-310`
+- **Issue:** DEF-0001 fix was too aggressive in field exclusion
+- **Missing Fields:** `is_strikethrough` (4,102 items = 39% of dataset) and `is_pending`
+- **Domain Knowledge Gap:** Failed to recognize that strikethrough is a core status field in Twos, not optional metadata
+
+**Code Evidence:**
+```python
+# database.py:153-160 - query_tasks_by_date_candidates()
+query = """
+    SELECT
+        id,
+        timestamp,
+        is_completed,
+        SUBSTR(content, 1, 100) AS content_preview
+    FROM things
+    WHERE 1=1
+"""
+# Missing: is_strikethrough, is_pending
+
+# database.py:296-310 - search_candidates()
+SELECT
+    t.id,
+    bm25(things_fts) AS relevance_score,
+    snippet(things_fts, 1, '<b>', '</b>', '...', 32) AS snippet,
+    t.timestamp,
+    t.is_completed
+# Missing: is_strikethrough, is_pending
+```
+
+**Impact:**
+- Queries about "crossed off" items fail (0 results when expecting 205)
+- Phase 2 two-phase retrieval pattern incomplete
+- User experience broken for common query pattern
+- 39% of dataset uses strikethrough feature
+
+**Fix Implemented:**
+Added `is_strikethrough` and `is_pending` to both candidate methods:
+
+**Changes Made:**
+1. **database.py:153-163** - Updated `query_tasks_by_date_candidates()` SELECT
+   - Added: `is_strikethrough, is_pending`
+   - Updated docstring to document all 8 returned fields
+
+2. **database.py:296-313** - Updated `search_candidates()` SELECT
+   - Added: `t.is_strikethrough, t.is_pending`
+   - Updated docstring to document all 9 returned fields
+
+3. **tests/test_database.py:502-510** - Updated `test_query_tasks_by_date_candidates()`
+   - Added assertions for `is_strikethrough` and `is_pending`
+
+4. **tests/test_database.py:298** - Updated `test_search_candidates()`
+   - Added "is_strikethrough" and "is_pending" to required_fields list
+
+**Test Results:**
+- ✅ All 9 database tests passing
+- ✅ Both candidate methods now return status fields
+- ✅ Minimal overhead: 2 booleans add ~2 bytes per record
+
+**Field Selection Rationale:**
+Essential status fields (included):
+- `is_completed`: Task checkbox completion
+- `is_strikethrough`: Crossed-off items (39% of dataset)
+- `is_pending`: Pending status
+
+Optional metadata (excluded):
+- `content_raw`: Original markdown (200+ chars)
+- `section_header`: Day grouping
+- `bullet_type`: Visual formatting
+- `indent_level`: Hierarchy (use `parent_task_id` instead)
+
+---
+
 ### DEF-0001: query_things_by_date returns full records instead of previews ✅ FIXED
 
 **Severity:** P0-Critical
@@ -97,11 +196,11 @@ Created new method `query_tasks_by_date_candidates()` with minimal field selecti
 
 ## Defect Statistics
 
-- **Total:** 1
+- **Total:** 2
 - **Active:** 0
-- **Fixed:** 1
+- **Fixed:** 2
 - **Severity Breakdown:**
-  - P0-Critical: 0 active, 1 fixed
+  - P0-Critical: 0 active, 2 fixed
   - P1-High: 0
   - P2-Medium: 0
   - P3-Low: 0
@@ -109,7 +208,7 @@ Created new method `query_tasks_by_date_candidates()` with minimal field selecti
   - Open: 0
   - Investigating: 0
   - Root Cause Found: 0
-  - Fixed & Tested: 1
+  - Fixed & Tested: 2
   - Verified in Production: 0 (awaiting user testing)
 
 ---
