@@ -630,7 +630,8 @@ def invoke_claude_analysis(
     json_path: Path,
     python_report_path: Path,
     changes_report_path: Path,
-    output_path: Path
+    output_path: Path,
+    timeout_seconds: int = 900
 ) -> bool:
     """
     Invoke Claude Code for semantic analysis.
@@ -640,6 +641,7 @@ def invoke_claude_analysis(
         python_report_path: Path to the Python analysis report.
         changes_report_path: Path to the changes report.
         output_path: Path where the AI report should be written.
+        timeout_seconds: Timeout in seconds for Claude Code (default: 900 = 15 minutes).
 
     Side effects:
         Executes the external `claude` CLI, which may use subscription quota
@@ -651,6 +653,8 @@ def invoke_claude_analysis(
 
     print("\n🤖 Invoking Claude Code for semantic analysis...")
     print("   (This will use your subscription quota)")
+    print(f"   ⏱️  Timeout: {timeout_seconds} seconds ({timeout_seconds//60} minutes)")
+    print("   💭 Large datasets may take several minutes - please wait...")
 
     # Read the grooming prompt template.
     prompt_file = Path("docs/DATA_GROOMING_PROMPT.md")
@@ -712,11 +716,12 @@ Execute steps 1-3 now without asking for confirmation.
             ],
             capture_output=True,
             text=True,
-            timeout=300,  # 5 minute timeout
+            timeout=timeout_seconds,
             stdin=subprocess.DEVNULL  # Signal no input coming - prevents waiting for stdin
         )
     except subprocess.TimeoutExpired:
-        print("❌ Claude Code timed out after 5 minutes")
+        print(f"❌ Claude Code timed out after {timeout_seconds} seconds ({timeout_seconds//60} minutes)")
+        print(f"   💡 Tip: Increase timeout with --ai-timeout {timeout_seconds * 2}")
         return False
 
     if result.returncode != 0:
@@ -753,8 +758,11 @@ Examples:
   # More aggressive duplicate detection
   python3 scripts/groom_data.py --duplicate-window 14
 
-  # With AI semantic analysis
+  # With AI semantic analysis (15 min timeout)
   python3 scripts/groom_data.py --ai-analysis
+
+  # AI analysis with longer timeout for large datasets
+  python3 scripts/groom_data.py --ai-analysis --ai-timeout 1800
 
   # Custom thresholds
   python3 scripts/groom_data.py --duplicate-window 3 --long-content-threshold 1000
@@ -789,6 +797,12 @@ Examples:
         "--ai-analysis",
         action="store_true",
         help="Invoke Claude Code for semantic analysis (uses subscription quota)"
+    )
+    parser.add_argument(
+        "--ai-timeout",
+        type=int,
+        default=900,
+        help="Timeout in seconds for AI analysis (default: 900 = 15 minutes)"
     )
 
     args = parser.parse_args()
@@ -912,7 +926,8 @@ Examples:
             args.json_file,
             python_report_path,
             changes_md_path,
-            ai_report_path
+            ai_report_path,
+            args.ai_timeout
         )
         if not success:
             print("\n⚠️  AI analysis failed, but cleaned data and reports are available")
