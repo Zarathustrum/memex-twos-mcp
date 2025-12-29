@@ -141,11 +141,12 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="search_things",
             description=(
-                "Full-text search across all thing content with BM25 relevance ranking. "
-                "Returns FULL records ordered by relevance (most relevant first) with highlighted snippets. "
-                "Each result includes all fields plus relevance_score and snippet. "
-                "For large result sets, consider using search_things_preview instead. "
-                "Supports FTS5 search operators: AND, OR, NOT, phrase queries with quotes."
+                "Keyword search for EXACT word matches using BM25 ranking. "
+                "Use this ONLY when searching for specific exact words or phrases. "
+                "⚠️ For conceptual queries (e.g., 'health-related', 'work stuff', 'things about moving'), "
+                "use semantic_search instead - it understands meaning and finds related content. "
+                "Returns FULL records with relevance_score and highlighted snippets. "
+                "Supports FTS5 operators: AND, OR, NOT, \"phrase queries\"."
             ),
             inputSchema={
                 "type": "object",
@@ -289,6 +290,42 @@ async def list_tools() -> list[Tool]:
             ),
             inputSchema={"type": "object", "properties": {}},
         ),
+        Tool(
+            name="semantic_search",
+            description=(
+                "⭐ USE THIS for queries about concepts, themes, or 'related' items. "
+                "Understands meaning and context - finds semantically similar content even without exact keywords. "
+                "Perfect for: 'health-related things', 'work projects', 'moving house', 'financial planning', etc. "
+                "Combines AI semantic understanding with keyword matching for best results. "
+                "Example: 'health' finds doctor, dentist, medical, wellness, checkup, medication, etc. "
+                "Falls back to keyword-only if semantic search unavailable."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Conceptual search query (natural language describing what you're looking for)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 50)",
+                        "default": 50
+                    },
+                    "lexical_weight": {
+                        "type": "number",
+                        "description": "Weight for keyword matching (0-1, default: 0.5)",
+                        "default": 0.5
+                    },
+                    "semantic_weight": {
+                        "type": "number",
+                        "description": "Weight for semantic similarity (0-1, default: 0.5)",
+                        "default": 0.5
+                    }
+                },
+                "required": ["query"]
+            }
+        ),
     ]
 
 
@@ -422,6 +459,21 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     elif name == "get_cache_stats":
         stats = database.get_cache_stats()
         return [TextContent(type="text", text=json.dumps(stats, indent=2, default=str))]
+
+    elif name == "semantic_search":
+        query = arguments["query"]
+        limit = arguments.get("limit", 50)
+        lexical_weight = arguments.get("lexical_weight", 0.5)
+        semantic_weight = arguments.get("semantic_weight", 0.5)
+
+        results = database.hybrid_search(
+            query,
+            limit=limit,
+            lexical_weight=lexical_weight,
+            semantic_weight=semantic_weight
+        )
+
+        return [TextContent(type="text", text=json.dumps(results, indent=2, default=str))]
 
     else:
         raise ValueError(f"Unknown tool: {name}")

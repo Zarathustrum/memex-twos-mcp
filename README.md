@@ -133,6 +133,48 @@ python3 src/convert_to_json.py data/raw/twos_export.md -o data/processed/twos_da
 - "Set reminder" → NER extracts nothing ✅ | Regex extracts "Set" ❌
 - "Meeting in March" → NER extracts nothing ✅ | Regex extracts "March" ❌
 
+### Installing Semantic Search (Optional)
+
+For hybrid search combining lexical (BM25) and semantic (vector) search:
+
+```bash
+pip install sentence-transformers sqlite-vec
+
+# Download embedding model (~90MB)
+python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+```
+
+**Why use semantic search?**
+- **Lexical-only:** Matches exact keywords - "doctor appointment" finds "doctor" and "appointment"
+- **With semantic:** Understands concepts - "medical checkup" also finds "doctor appointment", "dentist visit"
+- Better for conceptual queries like "moving house", "health issues", "work projects"
+
+**Usage:**
+```bash
+# Load data with embeddings (default)
+python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json
+
+# Disable embeddings (faster loading)
+MEMEX_DISABLE_EMBEDDINGS=1 python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned.json
+
+# Migrate existing database to add embeddings
+python3 scripts/migrate_add_embeddings.py data/processed/twos.db
+```
+
+**In Claude Desktop:**
+```
+# Keyword search (exact matches)
+"Search for the exact word 'doctor'"
+
+# Semantic search (understands meaning) - automatically selected for conceptual queries
+"Find health-related things from last year"  # Finds "doctor", "dentist", "checkup", etc.
+```
+
+**Performance:**
+- Embedding generation: ~10K things in <30 seconds (CPU)
+- Hybrid search: <200ms median (10K things)
+- Storage: ~1.5KB per thing (~15MB for 10K things)
+
 ## Example Queries
 
 - "Show me all things from last December"
