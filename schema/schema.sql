@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS things (
     timestamp_raw TEXT,
     content TEXT NOT NULL,
     content_raw TEXT,
+    content_hash TEXT,
     section_header TEXT,
     section_date TEXT,
     line_number INTEGER,
@@ -86,6 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_things_parent ON things(parent_task_id);
 CREATE INDEX IF NOT EXISTS idx_things_completed ON things(is_completed);
 CREATE INDEX IF NOT EXISTS idx_things_strikethrough ON things(is_strikethrough);
 CREATE INDEX IF NOT EXISTS idx_things_section ON things(section_header);
+CREATE INDEX IF NOT EXISTS idx_things_content_hash ON things(content_hash);
 
 CREATE INDEX IF NOT EXISTS idx_people_name ON people(name);
 CREATE INDEX IF NOT EXISTS idx_people_category ON people(category);
@@ -159,3 +161,24 @@ CREATE TABLE IF NOT EXISTS metadata (
 -- Insert initial metadata
 INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', '1.0');
 INSERT OR REPLACE INTO metadata (key, value) VALUES ('created_at', datetime('now'));
+
+-- ============================================================================
+-- Import Tracking (Phase 5: Incremental Ingestion)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file TEXT NOT NULL,
+    json_file TEXT,
+    mode TEXT NOT NULL,              -- 'rebuild', 'sync', 'append'
+    imported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    thing_count INTEGER,             -- Total things in import file
+    new_count INTEGER,               -- New things inserted
+    updated_count INTEGER,           -- Changed things updated
+    deleted_count INTEGER,           -- Things deleted (sync mode only)
+    duration_seconds REAL
+);
+
+-- Add metadata for tracking incremental state
+INSERT OR REPLACE INTO metadata (key, value)
+VALUES ('last_incremental_import', NULL);
