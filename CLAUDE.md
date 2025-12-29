@@ -129,8 +129,8 @@ Current tables:
 
 **Tools**:
 - `query_things_by_date(start_date, end_date, filters)` - Basic queries
-- `search_things(query)` - Full-text search (BM25)
-- `hybrid_search(query)` - Hybrid lexical + semantic search (Phase 4)
+- `search_things(query)` - Keyword search for exact matches (BM25)
+- `semantic_search(query)` - ⭐ Semantic + keyword search (Phase 4) - for conceptual queries
 - `get_person_things(person_name)` - Things mentioning a person
 - `get_tag_things(tag_name)` - Things with a tag
 - `get_things_stats()` - Database statistics

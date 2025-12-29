@@ -163,10 +163,10 @@ python3 scripts/migrate_add_embeddings.py data/processed/twos.db
 
 **In Claude Desktop:**
 ```
-# Lexical search (keyword-based)
-"Search for doctor appointments"
+# Keyword search (exact matches)
+"Search for the exact word 'doctor'"
 
-# Hybrid search (semantic + keyword)
+# Semantic search (understands meaning) - automatically selected for conceptual queries
 "Find health-related things from last year"  # Finds "doctor", "dentist", "checkup", etc.
 ```
 
