@@ -307,8 +307,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     database = require_db()
 
     if name == "query_things_by_date":
-        # Date-based query; database returns rows as dictionaries.
-        results = database.query_tasks_by_date(
+        # Date-based query with minimal candidate previews (two-phase retrieval)
+        results = database.query_tasks_by_date_candidates(
             start_date=arguments.get("start_date"),
             end_date=arguments.get("end_date"),
             limit=arguments.get("limit", 100),

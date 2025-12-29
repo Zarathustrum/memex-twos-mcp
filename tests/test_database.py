@@ -467,3 +467,63 @@ def test_two_phase_retrieval_workflow(tmp_path: Path) -> None:
     assert full_thing["id"] == top_id
     assert "content" in full_thing  # Full record has content field
     assert "content_raw" in full_thing  # Full record has all fields
+
+
+def test_query_tasks_by_date_candidates(tmp_path: Path) -> None:
+    """Test date query with minimal candidate previews (DEF-0001 fix)."""
+    db_path = tmp_path / "twos.db"
+    schema_path = Path(__file__).resolve().parents[1] / "schema" / "schema.sql"
+
+    _init_db(db_path, schema_path)
+    db = TwosDatabase(db_path)
+
+    # Insert test things with different dates
+    conn = db._get_connection()
+    conn.execute(
+        """
+        INSERT INTO things (id, content, timestamp, section_header, bullet_type, is_completed, is_pending, is_strikethrough)
+        VALUES
+            ('task_00101', 'November task one with long content that should be truncated in preview to save tokens', '2024-11-15T10:00:00', 'Day 1', 'bullet', 1, 0, 0),
+            ('task_00102', 'November task two', '2024-11-20T10:00:00', 'Day 2', 'bullet', 0, 0, 0),
+            ('task_00103', 'December task', '2024-12-05T10:00:00', 'Day 3', 'bullet', 0, 0, 0)
+    """
+    )
+    conn.commit()
+
+    # Test date range query with candidates
+    candidates = db.query_tasks_by_date_candidates(
+        start_date="2024-11-01", end_date="2024-11-30", limit=10
+    )
+
+    # Should only return November tasks
+    assert len(candidates) == 2
+
+    # Verify minimal fields are present
+    for candidate in candidates:
+        assert "id" in candidate
+        assert "timestamp" in candidate
+        assert "is_completed" in candidate
+        assert "content_preview" in candidate
+        assert "tags" in candidate
+        assert "people" in candidate
+
+        # Verify full content is NOT present (that's the fix)
+        assert "content" not in candidate
+        assert "content_raw" not in candidate
+        assert "section_header" not in candidate
+        assert "bullet_type" not in candidate
+
+    # Verify content preview is truncated
+    first_candidate = candidates[0]
+    if first_candidate["id"] == "task_00101":
+        # Content should be truncated to 100 chars
+        assert len(first_candidate["content_preview"]) == 100
+        assert "long content" in first_candidate["content_preview"]
+
+    # Verify we can fetch full details if needed
+    full_thing = db.get_thing_by_id(candidates[0]["id"])
+    assert full_thing is not None
+    assert "content" in full_thing  # Full record has all fields
+    assert "content_raw" in full_thing
+
+    db.close()

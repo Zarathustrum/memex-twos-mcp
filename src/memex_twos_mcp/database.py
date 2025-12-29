@@ -113,6 +113,103 @@ class TwosDatabase:
 
         return results
 
+    def query_tasks_by_date_candidates(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Query things within a date range and return minimal candidate previews.
+
+        This returns only essential fields for LLM preview (two-phase retrieval):
+        - id, timestamp, is_completed
+        - content_preview (truncated to 100 chars)
+        - tags, people
+
+        Results are ~75% smaller than full records. Use get_things_by_ids() to
+        fetch full content for selected candidates.
+
+        Args:
+            start_date: ISO format date string (YYYY-MM-DD)
+            end_date: ISO format date string (YYYY-MM-DD)
+            limit: Maximum number of candidates to return
+
+        Returns:
+            List of candidate dictionaries with minimal fields
+        """
+        # Check cache first
+        cache_key_parts = {"start": start_date, "end": end_date, "limit": limit}
+        cached = self.cache.get(
+            f"date_query:{start_date}:{end_date}", **cache_key_parts
+        )
+        if cached is not None:
+            return cached
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Build query with minimal SELECT fields
+        query = """
+            SELECT
+                id,
+                timestamp,
+                is_completed,
+                SUBSTR(content, 1, 100) AS content_preview
+            FROM things
+            WHERE 1=1
+        """
+        params: list[object] = []
+
+        if start_date:
+            query += " AND DATE(timestamp) >= ?"
+            params.append(start_date)
+
+        if end_date:
+            query += " AND DATE(timestamp) <= ?"
+            params.append(end_date)
+
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+
+        cursor.execute(query, params)
+
+        results = []
+        for row in cursor.fetchall():
+            result = dict(row)
+            thing_id = result["id"]
+
+            # Fetch tags for this thing
+            cursor.execute(
+                """
+                SELECT t.name
+                FROM tags t
+                JOIN thing_tags tt ON t.id = tt.tag_id
+                WHERE tt.thing_id = ?
+            """,
+                (thing_id,),
+            )
+            result["tags"] = [r[0] for r in cursor.fetchall()]
+
+            # Fetch people for this thing
+            cursor.execute(
+                """
+                SELECT p.name
+                FROM people p
+                JOIN thing_people tp ON p.id = tp.person_id
+                WHERE tp.thing_id = ?
+            """,
+                (thing_id,),
+            )
+            result["people"] = [r[0] for r in cursor.fetchall()]
+
+            results.append(result)
+
+        # Cache the results
+        self.cache.set(f"date_query:{start_date}:{end_date}", results, **cache_key_parts)
+
+        return results
+
     def search_content(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
         Full-text search across thing content with BM25 relevance ranking.
