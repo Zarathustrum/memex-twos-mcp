@@ -21,7 +21,7 @@ from .database import TwosDatabase
 
 
 # Initialize the MCP server with a stable name used by clients.
-app = Server("memex-twos-mcp")
+app = Server("memex-twos-mcp-v2")
 
 # Database instance (initialized in main and used by request handlers).
 db: TwosDatabase | None = None
@@ -141,15 +141,18 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="search_things",
             description=(
-                "Full-text search across all thing content. Uses FTS5 for fast searching. "
-                "Supports basic search operators."
+                "Full-text search across all thing content with BM25 relevance ranking. "
+                "Returns FULL records ordered by relevance (most relevant first) with highlighted snippets. "
+                "Each result includes all fields plus relevance_score and snippet. "
+                "For large result sets, consider using search_things_preview instead. "
+                "Supports FTS5 search operators: AND, OR, NOT, phrase queries with quotes."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query (supports FTS5 syntax: AND, OR, NOT)",
+                        "description": "Search query (supports FTS5 syntax: AND, OR, NOT, \"phrase queries\")",
                     },
                     "limit": {
                         "type": "integer",
@@ -158,6 +161,68 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["query"],
+            },
+        ),
+        Tool(
+            name="search_things_preview",
+            description=(
+                "Search things and return minimal candidate previews (two-phase retrieval). "
+                "Returns only essential fields: id, relevance_score, snippet, timestamp, tags, people, is_completed. "
+                "~75% smaller response size than search_things. Use this for initial search, "
+                "then call get_things_by_ids or get_thing_by_id to fetch full content for specific items. "
+                "Supports FTS5 search operators: AND, OR, NOT, phrase queries with quotes."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (supports FTS5 syntax: AND, OR, NOT, \"phrase queries\")",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of candidate previews (default: 50)",
+                        "default": 50,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="get_thing_by_id",
+            description=(
+                "Get a single thing by ID with full details including all fields, "
+                "tags, people, and links. Use after search_things_preview to fetch "
+                "complete content for specific items."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "thing_id": {
+                        "type": "string",
+                        "description": "The thing ID to fetch (e.g., 'task_00001')",
+                    },
+                },
+                "required": ["thing_id"],
+            },
+        ),
+        Tool(
+            name="get_things_by_ids",
+            description=(
+                "Batch fetch multiple things by IDs with full details. "
+                "Use after search_things_preview to fetch complete content for "
+                "selected candidates. More efficient than multiple get_thing_by_id calls."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "thing_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of thing IDs to fetch (e.g., ['task_00001', 'task_00002'])",
+                    },
+                },
+                "required": ["thing_ids"],
             },
         ),
         Tool(
@@ -216,6 +281,14 @@ async def list_tools() -> list[Tool]:
             ),
             inputSchema={"type": "object", "properties": {}},
         ),
+        Tool(
+            name="get_cache_stats",
+            description=(
+                "Get query cache performance statistics including cache size, "
+                "hit rate, and TTL. Useful for monitoring cache effectiveness."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
     ]
 
 
@@ -234,8 +307,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     database = require_db()
 
     if name == "query_things_by_date":
-        # Date-based query; database returns rows as dictionaries.
-        results = database.query_tasks_by_date(
+        # Date-based query with minimal candidate previews (two-phase retrieval)
+        results = database.query_tasks_by_date_candidates(
             start_date=arguments.get("start_date"),
             end_date=arguments.get("end_date"),
             limit=arguments.get("limit", 100),
@@ -245,12 +318,79 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         ]
 
     elif name == "search_things":
-        # Full-text search uses the SQLite FTS5 index for speed.
-        results = database.search_content(
-            query=arguments["query"], limit=arguments.get("limit", 50)
-        )
+        # Full-text search with BM25 ranking and snippet extraction (full records)
+        try:
+            results = database.search_content(
+                query=arguments["query"], limit=arguments.get("limit", 50)
+            )
+            return [
+                TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+            ]
+        except ValueError as e:
+            # Invalid FTS5 query syntax - return helpful error
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Invalid search query",
+                            "message": str(e),
+                            "query": arguments["query"],
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+
+    elif name == "search_things_preview":
+        # Two-phase retrieval: return minimal candidate previews
+        try:
+            candidates = database.search_candidates(
+                query=arguments["query"], limit=arguments.get("limit", 50)
+            )
+            return [
+                TextContent(
+                    type="text", text=json.dumps(candidates, indent=2, default=str)
+                )
+            ]
+        except ValueError as e:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Invalid search query",
+                            "message": str(e),
+                            "query": arguments["query"],
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+
+    elif name == "get_thing_by_id":
+        # Fetch single thing by ID
+        thing = database.get_thing_by_id(arguments["thing_id"])
+        if thing is None:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Thing not found",
+                            "thing_id": arguments["thing_id"],
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+        return [TextContent(type="text", text=json.dumps(thing, indent=2, default=str))]
+
+    elif name == "get_things_by_ids":
+        # Batch fetch things by IDs
+        things = database.get_things_by_ids(arguments["thing_ids"])
         return [
-            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+            TextContent(type="text", text=json.dumps(things, indent=2, default=str))
         ]
 
     elif name == "get_person_things":
@@ -279,6 +419,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         info = database.get_count_info()
         return [TextContent(type="text", text=json.dumps(info, indent=2, default=str))]
 
+    elif name == "get_cache_stats":
+        stats = database.get_cache_stats()
+        return [TextContent(type="text", text=json.dumps(stats, indent=2, default=str))]
+
     else:
         raise ValueError(f"Unknown tool: {name}")
 
@@ -289,7 +433,7 @@ async def main():
 
     Side effects:
         - Reads configuration from disk and environment variables.
-        - Opens a SQLite database connection on demand per request.
+        - Opens a persistent SQLite database connection (connection pooling).
         - Starts a JSON-RPC server over stdin/stdout.
 
     Returns:
@@ -311,18 +455,26 @@ async def main():
 
     db_path = config.db_path
 
-    # Initialize database wrapper (actual connections are opened per query).
+    # Initialize database wrapper with connection pooling and caching
     db = TwosDatabase(db_path)
 
     print(
-        "MCP stdio server ready. This process expects JSON-RPC over stdin; "
-        "use an MCP client to connect.",
+        "MCP stdio server ready (with connection pooling and caching). "
+        "This process expects JSON-RPC over stdin; use an MCP client to connect.",
         file=sys.stderr,
     )
 
-    # Run server over stdio; no network sockets are opened here.
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+    try:
+        # Run server over stdio; no network sockets are opened here.
+        async with stdio_server() as (read_stream, write_stream):
+            await app.run(
+                read_stream, write_stream, app.create_initialization_options()
+            )
+    finally:
+        # Clean shutdown: close database connection
+        if db:
+            db.close()
+            print("Database connection closed.", file=sys.stderr)
 
 
 if __name__ == "__main__":

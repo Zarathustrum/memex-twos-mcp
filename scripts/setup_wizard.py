@@ -317,12 +317,12 @@ def convert_and_load_data(data_type: str | None) -> None:
     ]
     db_path = Path("data/processed/twos.db")
     if db_path.exists():
-        overwrite = input_with_timeout(
-            "Database exists. Overwrite? (y/N)",
-            default="n",
-            timeout=10
-        )
-        if overwrite.lower() in ["y", "yes"]:
+        # No timeout here - user may have walked away during grooming
+        # This is a critical step that shouldn't default to "no"
+        overwrite = input("Database exists. Overwrite? (y/N) [y]: ").strip().lower()
+        if not overwrite:
+            overwrite = "y"  # Default to yes after grooming
+        if overwrite in ["y", "yes"]:
             load_args.append("--force")
         else:
             print("SKIP: Database load (existing database kept)")
