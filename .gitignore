@@ -70,3 +70,6 @@ docs/grooming-reports/*.json
 # Entity reports (contain personal data)
 docs/entity-reports/*.md
 docs/entity-reports/*.json
+
+# Temporary files
+tmp/
