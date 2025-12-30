@@ -175,7 +175,7 @@ python3 scripts/migrate_add_embeddings.py data/processed/twos.db
 - Hybrid search: <200ms median (10K things)
 - Storage: ~1.5KB per thing (~15MB for 10K things)
 
-### Incremental Ingestion (Phase 5)
+### Incremental Ingestion
 
 For faster updates when adding new data or making changes:
 

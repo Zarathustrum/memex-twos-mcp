@@ -22,23 +22,16 @@ MCP server
 Claude queries and analysis
 ```
 
-## Current Status
+## Implemented Features
 
-**Completed**:
 - ✅ Project structure and documentation
 - ✅ JSON converter with rich metadata extraction
-- ✅ Initial data conversion (~10,000 things)
-- ✅ Both repos on GitHub
 - ✅ LLM-assisted data grooming (identify duplicates, normalize entities, suggest schema improvements)
-- ✅ Phase 1: BM25 Full-Text Search
-- ✅ Phase 2: Two-Phase Retrieval
-- ✅ Phase 3: Query Result Caching
-- ✅ Phase 4: Hybrid Search (semantic + lexical with RRF)
-- ✅ Phase 5: Incremental Ingestion (content-hash based change detection)
-- ✅ Phase 6: Entity Extraction (spaCy NER for people extraction)
-
-**Next Steps**:
-1. Add analysis tools (patterns, timelines, narratives)
+- ✅ BM25 Full-Text Search
+- ✅ Two-Phase Retrieval with Caching
+- ✅ Hybrid Search (semantic + lexical with RRF)
+- ✅ Incremental Ingestion (content-hash based change detection)
+- ✅ Entity Extraction (spaCy NER for people extraction)
 
 ## File Structure
 
@@ -98,7 +91,7 @@ Each thing object contains:
 - No semantic understanding of thing relationships
 - Date/time parsing limited to specific formats
 
-**People Extraction** (Improved in Phase 6):
+**People Extraction**:
 - **With spaCy NER** (recommended): High accuracy (~90% precision), low false positives
 - **Without spaCy** (fallback): Regex-based extraction, prone to false positives (verbs, months)
 - Install NER: `pip install -e ".[ner]" && python -m spacy download en_core_web_sm`
@@ -116,19 +109,19 @@ python3 src/convert_to_json.py data/raw/input.md -o data/processed/output.json -
 ## SQLite Schema
 
 Current tables:
-- `things` (core thing data, includes `content_hash` for change detection - Phase 5)
+- `things` (core thing data, includes `content_hash` for change detection)
 - `people` (extracted and normalized)
 - `tags` (normalized taxonomy)
 - `links` (URLs with metadata)
 - `thing_people` (thing-person relationships)
 - `thing_tags` (thing-tag relationships)
 - `things_fts` (FTS5 search)
-- `thing_embeddings` (semantic embeddings, Phase 4)
-- `vec_index` (vector similarity search, Phase 4)
-- `imports` (import audit trail: mode, counts, duration - Phase 5)
+- `thing_embeddings` (semantic embeddings)
+- `vec_index` (vector similarity search)
+- `imports` (import audit trail: mode, counts, duration)
 - `metadata` (versioning and stats, includes incremental import tracking)
 
-## MCP Server Design (Planned)
+## MCP Server Design
 
 **Resources**:
 - `twos://database/stats` - Database statistics
@@ -138,7 +131,7 @@ Current tables:
 **Tools**:
 - `query_things_by_date(start_date, end_date, filters)` - Basic queries
 - `search_things(query)` - Keyword search for exact matches (BM25)
-- `semantic_search(query)` - ⭐ Semantic + keyword search (Phase 4) - for conceptual queries
+- `semantic_search(query)` - ⭐ Semantic + keyword search - for conceptual queries
 - `get_person_things(person_name)` - Things mentioning a person
 - `get_tag_things(tag_name)` - Things with a tag
 - `get_things_stats()` - Database statistics
@@ -147,7 +140,7 @@ Current tables:
 - Life narrative generation templates
 - Analysis prompt templates
 
-## Hybrid Search (Phase 4)
+## Hybrid Search
 
 **Overview:**
 Combines lexical (BM25) and semantic (vector) search using Reciprocal Rank Fusion (RRF) for better conceptual query matching.
@@ -199,7 +192,7 @@ python3 scripts/migrate_add_embeddings.py data/processed/twos.db
 - If sqlite-vec unavailable: Hybrid search disabled, lexical search still works
 - All existing tools continue to work without embeddings
 
-## Incremental Ingestion (Phase 5)
+## Incremental Ingestion
 
 **Overview:**
 Content-hash based change detection for 10-100x faster database updates when adding or modifying small numbers of things.
@@ -247,7 +240,7 @@ python3 scripts/migrate_add_incremental.py data/processed/twos.db
 **Key Features:**
 - **Deterministic hashing**: Same content always produces same hash
 - **FTS synchronization**: Delete+reinsert triggers FTS update automatically
-- **Embedding preservation**: Phase 4 embeddings only regenerated for changed things
+- **Embedding preservation**: Embeddings only regenerated for changed things
 - **Import audit trail**: Every import run tracked with stats (new/updated/deleted counts, duration)
 - **Backward compatible**: Default mode is 'rebuild' (existing behavior)
 

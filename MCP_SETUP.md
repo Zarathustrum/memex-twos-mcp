@@ -262,7 +262,7 @@ print(db.get_stats())
 # Activate venv
 source .venv/bin/activate
 
-# Run tests (when created)
+# Run tests
 pytest tests/
 ```
 
