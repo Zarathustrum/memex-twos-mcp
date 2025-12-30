@@ -227,3 +227,44 @@ CREATE TABLE IF NOT EXISTS imports (
 -- Add metadata for tracking incremental state
 INSERT OR REPLACE INTO metadata (key, value)
 VALUES ('last_incremental_import', NULL);
+
+-- ============================================================================
+-- TimePacks: Time-Based Rollups (Phase 7)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS rollups (
+    rollup_id TEXT PRIMARY KEY,        -- 'd:2025-12-30' | 'w:2025-12-22' | 'm:2025-12'
+    kind TEXT NOT NULL CHECK(kind IN ('d','w','m')),
+    start_date TEXT NOT NULL,          -- ISO date
+    end_date TEXT NOT NULL,            -- ISO date (inclusive)
+    thing_count INTEGER NOT NULL,
+    completed_count INTEGER NOT NULL,
+    pending_count INTEGER NOT NULL,
+    strikethrough_count INTEGER NOT NULL,
+
+    pack_v INTEGER NOT NULL,           -- Pack format version (1)
+    pack TEXT NOT NULL,                -- TP1 format (spec below)
+    kw TEXT NOT NULL,                  -- Space-separated keywords for search
+
+    src_hash TEXT NOT NULL,            -- Hash of (thing_id + content_hash) in window
+    build_import_id INTEGER,           -- imports.id if available
+    builder_v TEXT NOT NULL,           -- '1.0' or git sha
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+
+    FOREIGN KEY (build_import_id) REFERENCES imports(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rollups_kind_start ON rollups(kind, start_date);
+
+CREATE TABLE IF NOT EXISTS rollup_evidence (
+    rollup_id TEXT NOT NULL,
+    thing_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('hi','ev')),  -- hi=highlight, ev=evidence
+    rank INTEGER,
+    PRIMARY KEY (rollup_id, thing_id, role),
+    FOREIGN KEY (rollup_id) REFERENCES rollups(rollup_id) ON DELETE CASCADE,
+    FOREIGN KEY (thing_id) REFERENCES things(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_rollup_evidence_rollup_role ON rollup_evidence(rollup_id, role, rank);

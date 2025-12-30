@@ -1039,3 +1039,144 @@ class TwosDatabase:
             raise ValueError(
                 f"Invalid FTS5 query syntax: {query}. Error: {str(e)}"
             ) from e
+
+    # ========================================================================
+    # TimePacks: Rollup Queries (Phase 7)
+    # ========================================================================
+
+    def get_rollups(
+        self,
+        kind: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get rollups with optional filtering.
+
+        Args:
+            kind: Filter by kind ('d', 'w', 'm')
+            start_date: Filter by start_date >= value (ISO date)
+            end_date: Filter by start_date <= value (ISO date)
+            limit: Maximum results
+
+        Returns:
+            List of rollup dictionaries
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM rollups WHERE 1=1"
+        params: List[Any] = []
+
+        if kind:
+            query += " AND kind = ?"
+            params.append(kind)
+
+        if start_date:
+            query += " AND start_date >= ?"
+            params.append(start_date)
+
+        if end_date:
+            query += " AND start_date <= ?"
+            params.append(end_date)
+
+        query += " ORDER BY start_date DESC LIMIT ?"
+        params.append(limit)
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results
+
+    def get_rollup(self, rollup_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a single rollup by ID.
+
+        Args:
+            rollup_id: Rollup identifier (e.g., 'd:2025-12-30')
+
+        Returns:
+            Rollup dictionary or None
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM rollups WHERE rollup_id = ?", (rollup_id,))
+        row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return dict(row)
+
+    def get_rollup_highlights(self, rollup_id: str) -> List[Dict[str, Any]]:
+        """
+        Get full thing objects for rollup highlights.
+
+        Args:
+            rollup_id: Rollup identifier
+
+        Returns:
+            List of thing dictionaries (highlights only)
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Fetch highlight thing_ids with rank
+        cursor.execute(
+            """
+            SELECT thing_id, rank
+            FROM rollup_evidence
+            WHERE rollup_id = ? AND role = 'hi'
+            ORDER BY rank
+            """,
+            (rollup_id,)
+        )
+
+        highlight_ids = [(row[0], row[1]) for row in cursor.fetchall()]
+
+        # Fetch full thing objects
+        results = []
+        for thing_id, rank in highlight_ids:
+            thing = self.get_thing_by_id(thing_id)
+            if thing:
+                thing["highlight_rank"] = rank
+                results.append(thing)
+
+        return results
+
+    def search_rollups(
+        self,
+        keyword: str,
+        kind: Optional[str] = None,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Search rollups by keyword (searches kw column).
+
+        Args:
+            keyword: Search keyword
+            kind: Optional kind filter ('d', 'w', 'm')
+            limit: Maximum results
+
+        Returns:
+            List of matching rollup dictionaries
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM rollups WHERE kw LIKE ?"
+        params: List[Any] = [f"%{keyword}%"]
+
+        if kind:
+            query += " AND kind = ?"
+            params.append(kind)
+
+        query += " ORDER BY start_date DESC LIMIT ?"
+        params.append(limit)
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results

@@ -432,6 +432,84 @@ async def list_tools() -> list[Tool]:
                 "required": ["query"],
             },
         ),
+        Tool(
+            name="get_timepack",
+            description=(
+                "⭐ Get a TimePack rollup by ID (e.g., 'd:2025-12-30', 'w:2025-12-22', 'm:2025-12'). "
+                "Returns compact summary of things in that time period with highlights, "
+                "tag/people frequencies, and keywords. Perfect for 'what happened last week/month?' queries."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "rollup_id": {
+                        "type": "string",
+                        "description": "Rollup ID: 'd:YYYY-MM-DD' (day), 'w:YYYY-MM-DD' (week Monday), 'm:YYYY-MM' (month)",
+                    },
+                    "include_highlights": {
+                        "type": "boolean",
+                        "description": "Include full thing objects for highlights (default: false)",
+                        "default": False,
+                    },
+                },
+                "required": ["rollup_id"],
+            },
+        ),
+        Tool(
+            name="list_timepacks",
+            description=(
+                "List available TimePacks with optional filtering. "
+                "Use to discover what rollups exist or browse by kind (day/week/month)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "description": "Filter by kind: 'd' (day), 'w' (week), 'm' (month)",
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "Filter by start_date >= value (ISO date)",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "Filter by start_date <= value (ISO date)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 50)",
+                        "default": 50,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="search_timepacks",
+            description=(
+                "Search TimePacks by keyword. Searches the keywords extracted from "
+                "each rollup. Useful for finding time periods related to specific topics."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "keyword": {
+                        "type": "string",
+                        "description": "Search keyword",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Optional filter: 'd', 'w', or 'm'",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 20)",
+                        "default": 20,
+                    },
+                },
+                "required": ["keyword"],
+            },
+        ),
     ]
 
 
@@ -660,6 +738,66 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     ),
                 )
             ]
+
+    elif name == "get_timepack":
+        rollup_id = arguments["rollup_id"]
+        include_highlights = arguments.get("include_highlights", False)
+
+        rollup = database.get_rollup(rollup_id)
+
+        if rollup is None:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "TimePack not found",
+                            "rollup_id": rollup_id,
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+
+        # Optionally include full highlight objects
+        if include_highlights:
+            rollup["highlights"] = database.get_rollup_highlights(rollup_id)
+
+        return [
+            TextContent(type="text", text=json.dumps(rollup, indent=2, default=str))
+        ]
+
+    elif name == "list_timepacks":
+        kind = arguments.get("kind")
+        start_date = arguments.get("start_date")
+        end_date = arguments.get("end_date")
+        limit = arguments.get("limit", 50)
+
+        results = database.get_rollups(
+            kind=kind,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "search_timepacks":
+        keyword = arguments["keyword"]
+        kind = arguments.get("kind")
+        limit = arguments.get("limit", 20)
+
+        results = database.search_rollups(
+            keyword=keyword,
+            kind=kind,
+            limit=limit,
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
 
     else:
         raise ValueError(f"Unknown tool: {name}")
