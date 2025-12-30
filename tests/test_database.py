@@ -533,18 +533,18 @@ def test_query_tasks_by_date_candidates(tmp_path: Path) -> None:
     conn = db._get_connection()
     conn.execute(
         """
-        INSERT INTO things (id, content, timestamp, section_header, bullet_type, is_completed, is_pending, is_strikethrough)
+        INSERT INTO things
+        (id, content, timestamp, section_header, bullet_type, is_completed, is_pending, is_strikethrough)
         VALUES
             (
                 "task_00101",
-                "November task one with long content that should be truncated "
-                "in preview to save tokens",
+                "November task one with long content that should be truncated in preview to save tokens",
                 "2024-11-15T10:00:00",
                 "Day 1",
                 "bullet",
                 1,
                 0,
-                0,
+                0
             ),
             ('task_00102', 'November task two', '2024-11-20T10:00:00', 'Day 2', 'bullet', 0, 0, 0),
             ('task_00103', 'December task', '2024-12-05T10:00:00', 'Day 3', 'bullet', 0, 0, 0)

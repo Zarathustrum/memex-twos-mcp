@@ -157,7 +157,7 @@ def analyze_duplicates(
                 try:
                     ts = parser.parse(item["timestamp"])
                     items_with_time.append((ts, item))
-                except:
+                except Exception:
                     continue
 
             items_with_time.sort(key=lambda x: x[0])
@@ -191,9 +191,6 @@ def analyze_normalization(things: List[Dict[str, Any]]) -> Dict[str, Any]:
     Returns:
         A dict describing normalization opportunities for people and tags.
     """
-    people_variants = defaultdict(list)
-    tag_variants = defaultdict(list)
-
     # Collect all people and tags with counts.
     people_counter = Counter()
     tags_counter = Counter()
@@ -412,7 +409,7 @@ def generate_changes_report_md(
             report += f"- **Content:** `{item['content']}...`\n"
             report += f"  - Items: {', '.join(item['items'])}\n"
             report += f"  - {item['days_apart']} days apart\n"
-            report += f"  - **Action:** Manual review or AI analysis needed\n\n"
+            report += "  - **Action:** Manual review or AI analysis needed\n\n"
 
     # Long content
     long_items = changes.flagged_not_fixed.get("long_content", [])
@@ -429,7 +426,7 @@ def generate_changes_report_md(
         for item in norm[:15]:
             report += f"- **{item['type']}:** {item['description']}\n"
             report += f"  - **Recommendation:** {item['recommendation']}\n"
-            report += f"  - **Action:** Requires manual decision\n\n"
+            report += "  - **Action:** Requires manual decision\n\n"
 
     return report
 
@@ -537,7 +534,7 @@ def generate_python_report(
             variants_str = ", ".join([f"{v[0]} ({v[1]})" for v in issue["variants"]])
             report += f"- **{canonical}** ← {variants_str}\n"
             report += (
-                f"  - **Action:** Manual normalization or AI analysis recommended\n"
+                "  - **Action:** Manual normalization or AI analysis recommended\n"
             )
     else:
         report += "*No people normalization issues found*\n"
@@ -556,7 +553,7 @@ def generate_python_report(
             variants_str = ", ".join([f"{v[0]} ({v[1]})" for v in issue["variants"]])
             report += f"- **{canonical}** ← {variants_str}\n"
             report += (
-                f"  - **Action:** Manual normalization or AI analysis recommended\n"
+                "  - **Action:** Manual normalization or AI analysis recommended\n"
             )
     else:
         report += "*No tag normalization issues found*\n"
@@ -608,7 +605,7 @@ def analyze_statistics(things: List[Dict[str, Any]]) -> Dict[str, Any]:
         try:
             ts = parser.parse(thing["timestamp"])
             timestamps.append(ts)
-        except:
+        except Exception:
             continue
 
     timestamps.sort()
@@ -832,7 +829,8 @@ Examples:
 
     # Run Python analysis (no external services).
     print(
-        f"\n🔍 Running Python analysis (window={args.duplicate_window} days, long={args.long_content_threshold} chars)..."
+        f"\n🔍 Running Python analysis "
+        f"(window={args.duplicate_window} days, long={args.long_content_threshold} chars)..."
     )
 
     stats = analyze_statistics(things)
@@ -920,7 +918,7 @@ Examples:
     with open(changes_json_path, "w") as f:
         json.dump(changes_json, f, indent=2)
 
-    print(f"\n📊 Changes report saved:")
+    print("\n📊 Changes report saved:")
     print(f"  - {changes_md_path}")
     print(f"  - {changes_json_path}")
 
@@ -968,7 +966,7 @@ Examples:
         print("\n   OR skip entity classification and load cleaned data now:")
         print(f"      python3 scripts/load_to_sqlite.py {cleaned_path}")
     else:
-        print(f"\n📁 Next step: Load cleaned data into SQLite:")
+        print("\n📁 Next step: Load cleaned data into SQLite:")
         print(f"   python3 scripts/load_to_sqlite.py {cleaned_path}")
 
 
