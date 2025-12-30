@@ -1180,3 +1180,179 @@ class TwosDatabase:
         results = [dict(row) for row in cursor.fetchall()]
 
         return results
+
+    # ========================================================================
+    # MonthlySummaries: LLM-Powered Semantic Framing (Phase 8)
+    # ========================================================================
+
+    def get_month_summary(
+        self,
+        month_id: Optional[str] = None,
+        offset: int = 0
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a monthly summary by ID or offset.
+
+        Args:
+            month_id: Specific month ID (YYYY-MM) or None for current/offset
+            offset: Months back from current (0=current, 1=last month, etc.)
+
+        Returns:
+            Month summary dictionary or None
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        if month_id:
+            # Fetch specific month
+            cursor.execute(
+                "SELECT * FROM month_summaries WHERE month_id = ?",
+                (month_id,)
+            )
+            row = cursor.fetchone()
+
+            if row is None:
+                return None
+
+            result = dict(row)
+
+            # Parse suggested_questions JSON
+            if result.get("suggested_questions"):
+                try:
+                    import json
+                    result["suggested_questions"] = json.loads(result["suggested_questions"])
+                except json.JSONDecodeError:
+                    result["suggested_questions"] = {"questions": []}
+
+            return result
+
+        else:
+            # Fetch by offset
+            cursor.execute(
+                """
+                SELECT * FROM month_summaries
+                ORDER BY start_date DESC
+                LIMIT 1 OFFSET ?
+                """,
+                (offset,)
+            )
+            row = cursor.fetchone()
+
+            if row is None:
+                return None
+
+            result = dict(row)
+
+            # Parse suggested_questions JSON
+            if result.get("suggested_questions"):
+                try:
+                    import json
+                    result["suggested_questions"] = json.loads(result["suggested_questions"])
+                except json.JSONDecodeError:
+                    result["suggested_questions"] = {"questions": []}
+
+            return result
+
+    def list_month_summaries(self, limit: int = 12) -> List[Dict[str, Any]]:
+        """
+        Get list of monthly summaries.
+
+        Args:
+            limit: Maximum results (default 12)
+
+        Returns:
+            List of month summary dictionaries
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT * FROM month_summaries
+            ORDER BY start_date DESC
+            LIMIT ?
+            """,
+            (limit,)
+        )
+
+        results = []
+        for row in cursor.fetchall():
+            result = dict(row)
+
+            # Parse suggested_questions JSON
+            if result.get("suggested_questions"):
+                try:
+                    import json
+                    result["suggested_questions"] = json.loads(result["suggested_questions"])
+                except json.JSONDecodeError:
+                    result["suggested_questions"] = {"questions": []}
+
+            results.append(result)
+
+        return results
+
+    def get_month_summary_highlights(self, month_id: str) -> List[Dict[str, Any]]:
+        """
+        Get full thing objects for month summary highlights.
+
+        Args:
+            month_id: Month identifier (YYYY-MM)
+
+        Returns:
+            List of thing dictionaries (highlights only)
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Fetch highlight thing_ids with rank
+        cursor.execute(
+            """
+            SELECT thing_id, rank
+            FROM month_summary_evidence
+            WHERE month_id = ? AND role = 'hi'
+            ORDER BY rank
+            """,
+            (month_id,)
+        )
+
+        highlight_ids = [(row[0], row[1]) for row in cursor.fetchall()]
+
+        # Fetch full thing objects
+        results = []
+        for thing_id, rank in highlight_ids:
+            thing = self.get_thing_by_id(thing_id)
+            if thing:
+                thing["highlight_rank"] = rank
+                results.append(thing)
+
+        return results
+
+    def get_month_summary_questions(self, month_id: str) -> List[Dict[str, Any]]:
+        """
+        Get suggested questions for a month summary.
+
+        Args:
+            month_id: Month identifier (YYYY-MM)
+
+        Returns:
+            List of question dictionaries
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT suggested_questions FROM month_summaries WHERE month_id = ?",
+            (month_id,)
+        )
+
+        row = cursor.fetchone()
+
+        if row is None or not row[0]:
+            return []
+
+        try:
+            import json
+            questions_data = json.loads(row[0])
+            return questions_data.get("questions", [])
+        except json.JSONDecodeError:
+            return []

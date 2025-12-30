@@ -510,6 +510,50 @@ async def list_tools() -> list[Tool]:
                 "required": ["keyword"],
             },
         ),
+        Tool(
+            name="get_month_summary",
+            description=(
+                "⭐ Get LLM-powered monthly summary with semantic themes and suggested questions. "
+                "Perfect for 'what happened this month?' queries. Returns themes, highlights, "
+                "and follow-up exploration questions. Can fetch by month ID or offset (0=current, 1=last month)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "month_id": {
+                        "type": "string",
+                        "description": "Specific month ID (YYYY-MM) or None for offset-based",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Months back from current (0=current, 1=last month, default: 0)",
+                        "default": 0,
+                    },
+                    "include_highlights": {
+                        "type": "boolean",
+                        "description": "Include full thing objects for highlights (default: false)",
+                        "default": False,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="list_month_summaries",
+            description=(
+                "List available monthly summaries with metadata. "
+                "Useful for discovering what months have summaries or browsing history."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 12)",
+                        "default": 12,
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -794,6 +838,47 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             kind=kind,
             limit=limit,
         )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "get_month_summary":
+        month_id = arguments.get("month_id")
+        offset = arguments.get("offset", 0)
+        include_highlights = arguments.get("include_highlights", False)
+
+        summary = database.get_month_summary(month_id=month_id, offset=offset)
+
+        if summary is None:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Monthly summary not found",
+                            "month_id": month_id,
+                            "offset": offset,
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+
+        # Optionally include full highlight objects
+        if include_highlights:
+            summary["highlights"] = database.get_month_summary_highlights(
+                summary["month_id"]
+            )
+
+        return [
+            TextContent(type="text", text=json.dumps(summary, indent=2, default=str))
+        ]
+
+    elif name == "list_month_summaries":
+        limit = arguments.get("limit", 12)
+
+        results = database.list_month_summaries(limit=limit)
 
         return [
             TextContent(type="text", text=json.dumps(results, indent=2, default=str))

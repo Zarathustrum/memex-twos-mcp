@@ -268,3 +268,42 @@ CREATE TABLE IF NOT EXISTS rollup_evidence (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rollup_evidence_rollup_role ON rollup_evidence(rollup_id, role, rank);
+
+-- ============================================================================
+-- MonthlySummaries: LLM-Powered Semantic Framing (Phase 8)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS month_summaries (
+    month_id TEXT PRIMARY KEY,         -- 'YYYY-MM' (e.g., '2025-12')
+    start_date TEXT NOT NULL,          -- 'YYYY-MM-01'
+    end_date TEXT NOT NULL,            -- Last day of month
+    thing_count INTEGER NOT NULL,
+
+    pack_v INTEGER NOT NULL,           -- Pack format version (1)
+    pack TEXT NOT NULL,                -- MS1 format (spec below)
+    suggested_questions TEXT,          -- JSON array of suggested questions
+
+    src_hash TEXT NOT NULL,            -- Hash of (thing_id + content_hash) in month
+    build_import_id INTEGER,           -- imports.id if available
+    builder_v TEXT NOT NULL,           -- '1.0' or git sha
+
+    llm_model TEXT,                    -- 'claude-sonnet-4-5' or NULL
+    llm_conf REAL,                     -- Confidence score (0.0-1.0)
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+
+    FOREIGN KEY (build_import_id) REFERENCES imports(id)
+);
+
+CREATE TABLE IF NOT EXISTS month_summary_evidence (
+    month_id TEXT NOT NULL,
+    thing_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('hi','ev')),  -- hi=highlight, ev=evidence
+    rank INTEGER,
+    PRIMARY KEY (month_id, thing_id, role),
+    FOREIGN KEY (month_id) REFERENCES month_summaries(month_id) ON DELETE CASCADE,
+    FOREIGN KEY (thing_id) REFERENCES things(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_month_summaries_start ON month_summaries(start_date);
+CREATE INDEX IF NOT EXISTS idx_month_evidence_role ON month_summary_evidence(month_id, role, rank);
