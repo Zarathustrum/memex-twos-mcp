@@ -33,6 +33,9 @@ Claude queries and analysis
 - ✅ Incremental Ingestion (content-hash based change detection)
 - ✅ Entity Extraction (spaCy NER for people extraction)
 - ✅ **List Semantics** (section-based queries, date/topic lists, proper "list" understanding)
+- ✅ **TimePacks** (day/week/month rollups for "what happened last week?" queries)
+- ✅ **ThreadPacks** (active tag/person thread indices for activity tracking)
+- ✅ **MonthlySummaries** (LLM-powered semantic summaries with suggested questions)
 
 ## File Structure
 
@@ -111,8 +114,8 @@ python3 src/convert_to_json.py data/raw/input.md -o data/processed/output.json -
 
 Current tables:
 - `things` (core thing data, includes `content_hash`, `item_type`, `list_id`, `is_substantive`)
-- `lists` (**NEW**: section/header metadata with type, dates, boundaries, counts)
-- `thing_lists` (**NEW**: many-to-many thing-list relationships with position)
+- `lists` (section/header metadata with type, dates, boundaries, counts)
+- `thing_lists` (many-to-many thing-list relationships with position)
 - `people` (extracted and normalized)
 - `tags` (normalized taxonomy)
 - `links` (URLs with metadata)
@@ -123,6 +126,9 @@ Current tables:
 - `vec_index` (vector similarity search)
 - `imports` (import audit trail: mode, counts, duration)
 - `metadata` (versioning and stats, includes incremental import tracking)
+- **`rollups` + `rollup_evidence`** (day/week/month time-based rollups - Phase 7)
+- **`month_summaries` + `month_summary_evidence`** (LLM semantic summaries - Phase 8)
+- **`threads` + `thread_evidence` + `threads_fts`** (tag/person activity indices - Phase 9)
 
 ## MCP Server Design
 
@@ -138,10 +144,16 @@ Current tables:
 - `get_person_things(person_name)` - Things mentioning a person
 - `get_tag_things(tag_name)` - Things with a tag
 - `get_things_stats()` - Database statistics
-- **⭐ `get_list_by_date(date)` - Get ALL items on a date's list** (NEW)
-- **`get_list_by_name(name, list_type)` - Get ALL items on a named list** (NEW)
-- **`list_all_lists(list_type, limit)` - Get all lists with stats** (NEW)
-- **`search_within_list(query, list_id/date/name)` - Search within a list** (NEW)
+- **⭐ `get_list_by_date(date)` - Get ALL items on a date's list**
+- **`get_list_by_name(name, list_type)` - Get ALL items on a named list**
+- **`list_all_lists(list_type, limit)` - Get all lists with stats**
+- **`search_within_list(query, list_id/date/name)` - Search within a list**
+- **⭐ `get_timepack(rollup_id)` - Get day/week/month rollup** (Phase 7)
+- **`list_timepacks(kind, limit)` - List time-based rollups** (Phase 7)
+- **⭐ `get_month_summary(month_id, offset)` - Get LLM semantic summary** (Phase 8)
+- **`list_threads(status, kind, limit)` - List active/stale threads** (Phase 9)
+- **`get_thread(thread_id)` - Get tag or person thread details** (Phase 9)
+- **`get_thread_highlights(thread_id, limit)` - Get thread highlights** (Phase 9)
 
 **Prompts**:
 - Life narrative generation templates
@@ -348,6 +360,212 @@ WHERE list_type = 'date' AND list_date BETWEEN '2025-12-01' AND '2025-12-31';
 - Query by date: <50ms (10K things)
 - Migration (existing DB): ~10 seconds (10K things)
 
+## TimePacks: Time-Based Rollups (Phase 7)
+
+**Overview:**
+Precomputed day/week/month rollups for fast "what happened last week/month?" queries with minimal token usage.
+
+**Problem Solved:**
+- Before: "What happened last month?" → query all things, process 300+ items, high token cost
+- After: "What happened last month?" → 1 query, compact pack format, <100 tokens
+
+**Implementation:**
+- **Builder:** `scripts/build_timepacks.py`
+- **Tables:** `rollups` (rollup packs), `rollup_evidence` (highlight/evidence links)
+- **Pack Format:** TP1 (pipe-delimited, ~800 chars max)
+- **Highlight Scoring:** Deterministic weighted formula (40% recency, 30% entity density, 20% length, 10% status)
+- **Incremental:** SHA256 src_hash of (thing_id + content_hash) for change detection
+
+**TP1 Pack Format:**
+```
+TP1|k=<d|w|m>|s=<start_date>|e=<end_date>|n=<total>|cx=<completed>|pn=<pending>|st=<strikethrough>|tg=<tag:count,...>|pp=<person:count,...>|kw=<word,word,...>|hi=<thing_id~label;...>
+```
+
+**Usage:**
+```bash
+# Build rollups for last 12 months (default: day, week, month)
+python3 scripts/build_timepacks.py --db data/processed/twos.db
+
+# Build specific kinds only
+python3 scripts/build_timepacks.py --db data/processed/twos.db --kinds d,w
+
+# Force rebuild (ignore incremental)
+python3 scripts/build_timepacks.py --db data/processed/twos.db --force
+```
+
+**MCP Tools:**
+- `get_timepack(rollup_id)` - Get specific rollup (e.g., `d:2025-12-30`, `w:2025-12-22`, `m:2025-12`)
+- `list_timepacks(kind, limit)` - List recent rollups by kind
+
+**Performance:**
+- Build time: ~3-5 seconds for 10K things (730 days, 104 weeks, 24 months)
+- Storage: ~860 rollup rows for 2 years of data
+- Query time: <50ms for single rollup fetch
+
+## MonthlySummaries: LLM Semantic Framing (Phase 8)
+
+**Overview:**
+LLM-powered semantic summaries that provide "system prompt lite" context for monthly exploration.
+
+**Purpose:**
+- **TimePacks (Phase 7):** Mechanical facts - "what happened" (counts, tags, keywords)
+- **MonthlySummaries (Phase 8):** Semantic framing - "so what" (themes, insights, suggested questions)
+
+**Problem Solved:**
+When user asks "What happened this month?", provide semantic context that guides LLM exploration:
+- Identifies themes (e.g., "work_planning", "health_care")
+- Suggests relevant follow-up questions
+- Anchors all insights to specific thing IDs (no hallucinations)
+
+**Implementation:**
+- **Builder:** `scripts/build_month_summaries.py`
+- **Tables:** `month_summaries` (packs + suggested_questions JSON), `month_summary_evidence`
+- **LLM:** Invokes Claude via Claude Code CLI
+- **Pack Format:** MS1 (pipe-delimited, ~1200 chars max)
+- **Questions:** Separate JSON column with anchors and rationale
+
+**MS1 Pack Format:**
+```
+MS1|m=<YYYY-MM>|n=<total>|tg=<tag:count,...>|pp=<person:count,...>|th=<theme@thing_id,...;...>|hi=<thing_id~label;...>|nq=<question_count>
+```
+
+**Suggested Questions JSON:**
+```json
+{
+  "questions": [
+    {
+      "rank": 1,
+      "text": "What progress on Q4 planning this month?",
+      "anchors": ["task_08190", "task_08155"],
+      "thread_id": "thr:tag:work",
+      "rationale": "High work activity, multiple planning items"
+    }
+  ]
+}
+```
+
+**Usage:**
+```bash
+# Build summaries for last 12 months (requires Claude Code CLI)
+python3 scripts/build_month_summaries.py --db data/processed/twos.db
+
+# Build last 24 months
+python3 scripts/build_month_summaries.py --db data/processed/twos.db --months 24
+
+# Dry run (show what would be built, no LLM calls)
+python3 scripts/build_month_summaries.py --db data/processed/twos.db --dry-run
+```
+
+**MCP Tools:**
+- `get_month_summary(month_id, offset)` - Get summary (offset=0 for current month, 1 for last month, etc.)
+- `list_month_summaries(limit)` - List recent summaries
+
+**Validation:**
+- All thing_ids in themes/highlights must be from provided candidates
+- All themes must cite at least 2 thing_ids
+- Questions must be <100 chars and anchored to evidence
+- Invalid LLM responses trigger retry (max 2 attempts)
+
+**Performance:**
+- Build time: ~5-10 seconds per month (LLM API calls)
+- 12 months: ~1-2 minutes total
+- Storage: ~1KB per month summary (12-24 rows)
+
+## ThreadPacks: Active Thread Indices (Phase 9)
+
+**Overview:**
+Deterministic activity indices for tags and people. Answers "What's active with Alice?" or "Show me recent #work threads" with no embeddings required.
+
+**Problem Solved:**
+- Before: "What's active with Alice?" → query all things, filter by person, manual recency analysis
+- After: "What's active with Alice?" → 1 query, pre-indexed thread with highlights and activity stats
+
+**Implementation:**
+- **Builder:** `scripts/build_threads.py`
+- **Tables:** `threads` (thread packs), `thread_evidence`, `threads_fts` (search)
+- **Thread Types:** Single-tag threads (e.g., `thr:tag:work`), single-person threads (e.g., `thr:person:alice`)
+- **Active Window:** Configurable (default 90 days)
+- **Status:** `active` (activity in last 90d), `stale` (no recent activity), `archived` (manually archived)
+
+**TH1 Pack Format:**
+```
+TH1|id=<thread_id>|st=<active|stale>|last=<last_ts>|n=<total>|a90=<count_90d>|kw=<word,word,...>|hi=<thing_id~label;...>
+```
+
+**Usage:**
+```bash
+# Build all threads (default: tag + person, 90-day active window)
+python3 scripts/build_threads.py --db data/processed/twos.db
+
+# Custom active window (60 days)
+python3 scripts/build_threads.py --db data/processed/twos.db --active-days 60
+
+# Build only tag threads
+python3 scripts/build_threads.py --db data/processed/twos.db --kinds tag
+
+# Force rebuild
+python3 scripts/build_threads.py --db data/processed/twos.db --force
+```
+
+**MCP Tools:**
+- `list_threads(status, kind, limit)` - List threads (filter by active/stale, tag/person)
+- `get_thread(thread_id)` - Get thread details
+- `get_thread_highlights(thread_id, limit)` - Get highlight things
+- (Implicit) `search_threads(query)` via threads_fts
+
+**Highlight Scoring:**
+For threads, scoring focuses on recency within the active window:
+- 50% recency (exponential decay from now)
+- 30% entity density (tags + people)
+- 20% content length
+
+**Incremental Rebuild:**
+- Collects affected threads by checking thing_tags/thing_people changes
+- Recomputes src_hash only for affected threads
+- Skips unchanged threads (fast updates)
+
+**Performance:**
+- Build time: ~1-3 seconds for 10K things with 50 tags + 100 people
+- Storage: ~150 thread rows typical (varies by tag/person count)
+- Query time: <50ms for thread fetch, <100ms for FTS search
+
+**Future Enhancements (Deferred):**
+- Multi-tag intersection threads (e.g., `thr:tag:work+urgent`) - currently computed at query time
+- Thread archival with archived_at timestamp
+
+## Unified Builder Orchestrator (build_all.py)
+
+**Overview:**
+Coordinates execution of all three derived index builders with dependency management and error handling.
+
+**Usage:**
+```bash
+# Run default builders (timepacks + threads, NO LLM)
+python3 scripts/build_all.py --db data/processed/twos.db
+
+# Include LLM-powered monthly summaries
+python3 scripts/build_all.py --db data/processed/twos.db --with-llm
+
+# Run specific builders only
+python3 scripts/build_all.py --db data/processed/twos.db --builders timepacks,threads
+
+# Force rebuild all
+python3 scripts/build_all.py --db data/processed/twos.db --force
+```
+
+**Execution Order:**
+1. TimePacks (no dependencies)
+2. ThreadPacks (no dependencies, runs after TimePacks for simplicity)
+3. MonthlySummaries (depends on TimePacks existing)
+
+**Error Handling:**
+- If TimePacks fails → skip MonthlySummaries, but still run ThreadPacks
+- If ThreadPacks fails → continue to MonthlySummaries (if requested)
+- All errors logged, partial success = exit code 1
+
+**Integration:**
+Called by `setup_wizard.py` after database load (opt-in via prompt).
+
 ## Development Workflow
 
 1. Make changes in `<path-to-project>/memex-twos-mcp`
@@ -387,6 +605,8 @@ python3 src/convert_to_json.py data/raw/twos_export.md -o data/processed/twos_da
 python3 scripts/groom_data.py  # Auto-fix duplicates, generate cleaned file
 python3 scripts/build_list_metadata.py data/processed/twos_data_cleaned.json  # Add list metadata
 python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned_with_lists.json  # Use enhanced version
+python3 scripts/build_all.py --db data/processed/twos.db  # Build derived indices (timepacks, threads)
+# Optional: python3 scripts/build_all.py --db data/processed/twos.db --with-llm  # Include AI summaries
 source .venv/bin/activate && python3 -c "from memex_twos_mcp.database import TwosDatabase; from pathlib import Path; print(TwosDatabase(Path('data/processed/twos.db')).get_stats())"
 
 # Incremental update (daily updates, new data):
@@ -394,6 +614,7 @@ python3 src/convert_to_json.py data/raw/twos_export.md -o data/processed/twos_da
 python3 scripts/groom_data.py
 python3 scripts/build_list_metadata.py data/processed/twos_data_cleaned.json  # Add list metadata
 python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned_with_lists.json --incremental  # 10x faster
+python3 scripts/build_all.py --db data/processed/twos.db  # Rebuild derived indices incrementally
 source .venv/bin/activate && python3 -c "from memex_twos_mcp.database import TwosDatabase; from pathlib import Path; print(TwosDatabase(Path('data/processed/twos.db')).get_stats())"
 
 # Migrate existing database (if you already have a database without list metadata):
