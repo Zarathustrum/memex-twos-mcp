@@ -356,12 +356,12 @@ def collect_configuration(
                 default=False,
             )
 
-            if config.run_ai_analysis:
-                config.run_entity_classification = prompt_yes_no(
-                    renderer,
-                    "Run entity classification (filter misclassified entities)?",
-                    default=False,
-                )
+        # Entity classification is independent of AI semantic analysis
+        config.run_entity_classification = prompt_yes_no(
+            renderer,
+            "Run entity classification (filter misclassified entities, uses Claude Code)?",
+            default=False,
+        )
 
         db_path = Path(config.db_path)
         if db_path.exists():
