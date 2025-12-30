@@ -24,8 +24,12 @@ CREATE TABLE IF NOT EXISTS things (
     is_completed BOOLEAN DEFAULT 0,
     is_pending BOOLEAN DEFAULT 0,
     is_strikethrough BOOLEAN DEFAULT 0,
+    item_type TEXT DEFAULT 'content',          -- 'content' | 'divider' | 'header' | 'metadata'
+    list_id TEXT,                              -- Denormalized FK to lists.list_id
+    is_substantive BOOLEAN DEFAULT 1,          -- Cached flag: item_type='content' AND length(content) > 3
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (parent_task_id) REFERENCES things(id) ON DELETE SET NULL
+    FOREIGN KEY (parent_task_id) REFERENCES things(id) ON DELETE SET NULL,
+    FOREIGN KEY (list_id) REFERENCES lists(list_id) ON DELETE SET NULL
 );
 
 -- ============================================================================
@@ -88,6 +92,9 @@ CREATE INDEX IF NOT EXISTS idx_things_completed ON things(is_completed);
 CREATE INDEX IF NOT EXISTS idx_things_strikethrough ON things(is_strikethrough);
 CREATE INDEX IF NOT EXISTS idx_things_section ON things(section_header);
 CREATE INDEX IF NOT EXISTS idx_things_content_hash ON things(content_hash);
+CREATE INDEX IF NOT EXISTS idx_things_list_id ON things(list_id);
+CREATE INDEX IF NOT EXISTS idx_things_item_type ON things(item_type);
+CREATE INDEX IF NOT EXISTS idx_things_substantive ON things(is_substantive) WHERE is_substantive = 1;
 
 CREATE INDEX IF NOT EXISTS idx_people_name ON people(name);
 CREATE INDEX IF NOT EXISTS idx_people_category ON people(category);
@@ -98,6 +105,44 @@ CREATE INDEX IF NOT EXISTS idx_thing_people_person ON thing_people(person_id);
 CREATE INDEX IF NOT EXISTS idx_thing_tags_tag ON thing_tags(tag_id);
 
 CREATE INDEX IF NOT EXISTS idx_links_thing ON links(thing_id);
+
+-- ============================================================================
+-- Lists (Section/Header Groupings)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS lists (
+    list_id TEXT PRIMARY KEY,              -- e.g., 'date_2025-12-30', 'topic_tech-projects_5678'
+    list_type TEXT NOT NULL,               -- 'date' | 'topic' | 'category' | 'metadata'
+    list_name TEXT NOT NULL,               -- Normalized: '2025-12-30' | 'Tech Projects'
+    list_name_raw TEXT NOT NULL,           -- Original: 'Mon, Dec 30, 2025' | 'Tech Projects'
+    list_date TEXT,                        -- ISO date for type='date', NULL otherwise
+    start_line INTEGER NOT NULL,           -- First line of section (inclusive)
+    end_line INTEGER NOT NULL,             -- Last line of section (inclusive)
+    item_count INTEGER DEFAULT 0,          -- Total things in range
+    substantive_count INTEGER DEFAULT 0,   -- Things with item_type='content'
+    created_at TEXT NOT NULL,              -- Import timestamp
+    UNIQUE(list_name, start_line)          -- Prevent duplicates
+);
+
+CREATE INDEX IF NOT EXISTS idx_lists_type ON lists(list_type);
+CREATE INDEX IF NOT EXISTS idx_lists_date ON lists(list_date) WHERE list_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_lists_name ON lists(list_name);
+CREATE INDEX IF NOT EXISTS idx_lists_lines ON lists(start_line, end_line);
+
+-- ============================================================================
+-- Thing-List Relationships (Many-to-Many)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS thing_lists (
+    thing_id TEXT NOT NULL,
+    list_id TEXT NOT NULL,
+    position_in_list INTEGER,             -- 0-indexed position within list
+    PRIMARY KEY (thing_id, list_id),
+    FOREIGN KEY (thing_id) REFERENCES things(id) ON DELETE CASCADE,
+    FOREIGN KEY (list_id) REFERENCES lists(list_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_thing_lists_list ON thing_lists(list_id, position_in_list);
 
 -- ============================================================================
 -- Full Text Search (FTS5)

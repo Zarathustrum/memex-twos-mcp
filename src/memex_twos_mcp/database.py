@@ -806,3 +806,236 @@ class TwosDatabase:
                 results.append(thing)
 
         return results
+
+    # ========================================================================
+    # List-Scoped Queries (Phase 6: List Semantics)
+    # ========================================================================
+
+    def get_list_by_date(
+        self, date: str, include_non_substantive: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all items on the list for a specific date.
+
+        Args:
+            date: ISO date string (YYYY-MM-DD) or 'today'
+            include_non_substantive: Include dividers/headers (default: False)
+
+        Returns:
+            List of thing dictionaries ordered by line_number
+        """
+        if date == "today":
+            from datetime import datetime
+
+            date = datetime.now().date().isoformat()
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Build query
+        query = """
+            SELECT t.*
+            FROM things t
+            WHERE t.list_id = ?
+        """
+        params = [f"date_{date}"]
+
+        if not include_non_substantive:
+            query += " AND t.item_type = 'content'"
+
+        query += " ORDER BY t.line_number"
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results
+
+    def get_list_by_name(
+        self,
+        name: str,
+        list_type: Optional[str] = None,
+        include_non_substantive: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all items on a named list (e.g., 'Tech Projects').
+
+        Args:
+            name: List name (case-insensitive)
+            list_type: Optional filter ('topic', 'date', 'category')
+            include_non_substantive: Include dividers/headers (default: False)
+
+        Returns:
+            List of thing dictionaries ordered by line_number
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Build query
+        query = """
+            SELECT t.*
+            FROM things t
+            JOIN lists l ON t.list_id = l.list_id
+            WHERE LOWER(l.list_name) = LOWER(?)
+        """
+        params = [name]
+
+        if list_type:
+            query += " AND l.list_type = ?"
+            params.append(list_type)
+
+        if not include_non_substantive:
+            query += " AND t.item_type = 'content'"
+
+        query += " ORDER BY t.line_number"
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results
+
+    def get_all_lists(
+        self, list_type: Optional[str] = None, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all lists with summary statistics.
+
+        Args:
+            list_type: Optional filter ('date', 'topic', 'category')
+            limit: Max results (default 50)
+
+        Returns:
+            List of list dictionaries with stats
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        query = """
+            SELECT
+                l.list_id,
+                l.list_type,
+                l.list_name,
+                l.list_name_raw,
+                l.list_date,
+                l.substantive_count AS items,
+                COUNT(CASE WHEN t.is_completed = 0 AND t.item_type = 'content' THEN 1 END) AS open_items,
+                COUNT(CASE WHEN t.is_completed = 1 AND t.item_type = 'content' THEN 1 END) AS completed_items
+            FROM lists l
+            LEFT JOIN things t ON l.list_id = t.list_id
+        """
+        params = []
+
+        if list_type:
+            query += " WHERE l.list_type = ?"
+            params.append(list_type)
+
+        query += """
+            GROUP BY l.list_id
+            ORDER BY l.list_date DESC NULLS LAST, l.list_name
+            LIMIT ?
+        """
+        params.append(limit)
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results
+
+    def get_list_metadata(self, list_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get metadata for a specific list.
+
+        Args:
+            list_id: List identifier
+
+        Returns:
+            List metadata dictionary or None if not found
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM lists WHERE list_id = ?", (list_id,))
+        row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return dict(row)
+
+    def search_within_list(
+        self,
+        query: str,
+        list_id: Optional[str] = None,
+        list_date: Optional[str] = None,
+        list_name: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for items within a specific list.
+
+        Must provide one of: list_id, list_date, or list_name.
+
+        Args:
+            query: Search query (FTS5 syntax)
+            list_id: Exact list ID
+            list_date: ISO date for date-based lists
+            list_name: List name (case-insensitive)
+            limit: Max results
+
+        Returns:
+            List of matching thing dictionaries with relevance scores
+
+        Raises:
+            ValueError: If no list identifier provided or invalid query
+        """
+        if not (list_id or list_date or list_name):
+            raise ValueError(
+                "Must provide one of: list_id, list_date, or list_name"
+            )
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Determine list_id from other parameters if needed
+        target_list_id = list_id
+
+        if not target_list_id and list_date:
+            target_list_id = f"date_{list_date}"
+
+        if not target_list_id and list_name:
+            # Look up list_id from list_name
+            cursor.execute(
+                "SELECT list_id FROM lists WHERE LOWER(list_name) = LOWER(?) LIMIT 1",
+                (list_name,),
+            )
+            row = cursor.fetchone()
+            if row:
+                target_list_id = row[0]
+            else:
+                # List not found
+                return []
+
+        try:
+            # Search within list using FTS
+            cursor.execute(
+                """
+                SELECT t.*,
+                       bm25(things_fts) AS relevance_score,
+                       snippet(things_fts, 1, '<b>', '</b>', '...', 32) AS snippet
+                FROM things t
+                JOIN things_fts fts ON t.id = fts.thing_id
+                WHERE things_fts MATCH ?
+                  AND t.list_id = ?
+                  AND t.item_type = 'content'
+                ORDER BY bm25(things_fts)
+                LIMIT ?
+            """,
+                (query, target_list_id, limit),
+            )
+
+            results = [dict(row) for row in cursor.fetchall()]
+            return results
+
+        except Exception as e:
+            raise ValueError(
+                f"Invalid FTS5 query syntax: {query}. Error: {str(e)}"
+            ) from e

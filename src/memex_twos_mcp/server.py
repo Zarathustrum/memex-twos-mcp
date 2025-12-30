@@ -326,6 +326,112 @@ async def list_tools() -> list[Tool]:
                 "required": ["query"],
             },
         ),
+        Tool(
+            name="get_list_by_date",
+            description=(
+                "⭐ Get ALL items on the list for a specific date. "
+                "Use this when user asks 'what's on my list for today/Dec 30/etc?' "
+                "Returns ALL items under that day's section header, not just timestamped items. "
+                "This is the correct tool for 'list' questions about dates."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "ISO date (YYYY-MM-DD) or 'today'",
+                    },
+                    "include_non_substantive": {
+                        "type": "boolean",
+                        "description": "Include dividers/headers (default: false)",
+                        "default": False,
+                    },
+                },
+                "required": ["date"],
+            },
+        ),
+        Tool(
+            name="get_list_by_name",
+            description=(
+                "Get all items on a named topic list (e.g., 'Tech Projects', 'Shopping List'). "
+                "Use this for non-date-based lists."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "List name (case-insensitive)",
+                    },
+                    "list_type": {
+                        "type": "string",
+                        "description": "Optional filter: 'topic', 'date', or 'category'",
+                    },
+                    "include_non_substantive": {
+                        "type": "boolean",
+                        "description": "Include dividers/headers (default: false)",
+                        "default": False,
+                    },
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="list_all_lists",
+            description=(
+                "Get all lists with summary statistics (item counts, completion status). "
+                "Useful for discovering available lists or getting an overview."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "list_type": {
+                        "type": "string",
+                        "description": "Optional filter: 'date', 'topic', or 'category'",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 50)",
+                        "default": 50,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="search_within_list",
+            description=(
+                "Search for items within a specific list. "
+                "Useful for finding specific content on today's list or a topic list. "
+                "Example: 'Find tasks about email on today's list'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (FTS5 syntax)",
+                    },
+                    "list_id": {
+                        "type": "string",
+                        "description": "Exact list ID (optional)",
+                    },
+                    "list_date": {
+                        "type": "string",
+                        "description": "ISO date for date-based lists (optional)",
+                    },
+                    "list_name": {
+                        "type": "string",
+                        "description": "List name (optional, case-insensitive)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 50)",
+                        "default": 50,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
     ]
 
 
@@ -478,6 +584,82 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         return [
             TextContent(type="text", text=json.dumps(results, indent=2, default=str))
         ]
+
+    elif name == "get_list_by_date":
+        date = arguments["date"]
+        include_non_substantive = arguments.get("include_non_substantive", False)
+
+        results = database.get_list_by_date(
+            date=date,
+            include_non_substantive=include_non_substantive,
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "get_list_by_name":
+        name_arg = arguments["name"]
+        list_type = arguments.get("list_type")
+        include_non_substantive = arguments.get("include_non_substantive", False)
+
+        results = database.get_list_by_name(
+            name=name_arg,
+            list_type=list_type,
+            include_non_substantive=include_non_substantive,
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "list_all_lists":
+        list_type = arguments.get("list_type")
+        limit = arguments.get("limit", 50)
+
+        results = database.get_all_lists(
+            list_type=list_type,
+            limit=limit,
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "search_within_list":
+        query = arguments["query"]
+        list_id = arguments.get("list_id")
+        list_date = arguments.get("list_date")
+        list_name = arguments.get("list_name")
+        limit = arguments.get("limit", 50)
+
+        try:
+            results = database.search_within_list(
+                query=query,
+                list_id=list_id,
+                list_date=list_date,
+                list_name=list_name,
+                limit=limit,
+            )
+            return [
+                TextContent(
+                    type="text", text=json.dumps(results, indent=2, default=str)
+                )
+            ]
+        except ValueError as e:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Invalid search query or list identifier",
+                            "message": str(e),
+                            "query": query,
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
 
     else:
         raise ValueError(f"Unknown tool: {name}")
