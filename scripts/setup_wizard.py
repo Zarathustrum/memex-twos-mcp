@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,8 @@ class WizardConfig:
     run_ai_analysis: bool = False
     run_entity_classification: bool = False
     overwrite_db: bool = True
+    build_derived_indices: bool = True
+    build_with_llm: bool = False
     generate_mcp_config: bool = True
 
     # Input/output paths
@@ -91,7 +94,7 @@ class ConsoleRenderer:
         else:
             self.console = None
 
-    def banner(self, stage_num: int, title: str, total_stages: int = 14) -> None:
+    def banner(self, stage_num: int, title: str, total_stages: int = 15) -> None:
         """Print a stage banner."""
         if self.use_rich:
             header = f"[bold cyan]{stage_num:02d} / {total_stages:02d}[/bold cyan]  [bold white]{title}[/bold white]"
@@ -363,6 +366,19 @@ def collect_configuration(
             default=False,
         )
 
+        config.build_derived_indices = prompt_yes_no(
+            renderer,
+            "Build derived indices (rollups, threads - recommended for analysis)?",
+            default=True,
+        )
+
+        if config.build_derived_indices:
+            config.build_with_llm = prompt_yes_no(
+                renderer,
+                "Include LLM-powered monthly summaries (uses Claude Code subscription)?",
+                default=False,
+            )
+
         db_path = Path(config.db_path)
         if db_path.exists():
             config.overwrite_db = prompt_yes_no(
@@ -385,6 +401,9 @@ def collect_configuration(
         print(f"  Grooming: {'Yes' if config.run_grooming else 'No'}")
         print(f"  AI analysis: {'Yes' if config.run_ai_analysis else 'No'}")
         print(f"  Entity classification: {'Yes' if config.run_entity_classification else 'No'}")
+        print(f"  Derived indices: {'Yes' if config.build_derived_indices else 'No'}")
+        if config.build_derived_indices:
+            print(f"  With LLM summaries: {'Yes' if config.build_with_llm else 'No'}")
     print(f"  MCP config: {'Yes' if config.generate_mcp_config else 'No'}")
     renderer.rule()
     print()
@@ -723,9 +742,89 @@ def stage_embeddings(renderer: ConsoleRenderer, config: WizardConfig) -> StageRe
     return StageResult(success=True, duration=time.time() - start)
 
 
+def stage_derived_indices(renderer: ConsoleRenderer, config: WizardConfig) -> StageResult:
+    """Build derived indices (rollups, threads, optional LLM summaries)."""
+    renderer.banner(11, "DERIVED INDICES (OPTIONAL)")
+    start = time.time()
+
+    if config.data_mode == "skip" or not config.build_derived_indices:
+        renderer.status("SKIP", "Derived indices")
+        return StageResult(success=True, duration=time.time() - start)
+
+    try:
+        # Import the orchestrator function
+        sys.path.insert(0, str(Path(__file__).parent))
+        from build_all import build_derived_indices
+
+        db_path = Path(config.db_path)
+
+        # Run orchestrator
+        with renderer.spinner(
+            "Building derived indices (timepacks, threads"
+            + (", summaries" if config.build_with_llm else "")
+            + ")..."
+        ):
+            result = build_derived_indices(
+                db_path=db_path,
+                with_llm=config.build_with_llm,
+                force=False,  # Never force in wizard
+                verbose=config.verbose,
+            )
+
+        if result["success"]:
+            succeeded = result["builders_succeeded"]
+            duration = result["duration_seconds"]
+
+            # Format stats for display
+            stats_parts = []
+            if "timepacks" in succeeded:
+                stats_parts.append("rollups")
+            if "threads" in succeeded:
+                stats_parts.append("threads")
+            if "summaries" in succeeded:
+                stats_parts.append("summaries")
+
+            stats_str = ", ".join(stats_parts)
+            renderer.status("OK", f"Built {stats_str} in {duration:.1f}s")
+
+            # Store metrics
+            metrics = {}
+            for builder, stats in result.get("stats", {}).items():
+                for key, value in stats.items():
+                    metrics[f"{builder}_{key}"] = value
+
+            return StageResult(
+                success=True, duration=time.time() - start, metrics=metrics
+            )
+        else:
+            # Partial success is OK - some builders may have failed
+            failed = result["builders_failed"]
+            errors = result["errors"]
+            error_msg = "; ".join(f"{b}: {errors.get(b, 'unknown')}" for b in failed)
+
+            if result["builders_succeeded"]:
+                # Some succeeded, some failed - warn but continue
+                renderer.status(
+                    "WARN",
+                    f"Some builders failed: {', '.join(failed)}",
+                    detail=error_msg,
+                )
+                return StageResult(success=True, duration=time.time() - start)
+            else:
+                # All failed - this is a real error
+                renderer.status("FAIL", f"All builders failed: {error_msg}")
+                return StageResult(success=False, duration=time.time() - start)
+
+    except Exception as e:
+        renderer.status("FAIL", f"Derived indices build failed: {e}")
+        if config.verbose:
+            traceback.print_exc()
+        return StageResult(success=False, duration=time.time() - start)
+
+
 def stage_validation(renderer: ConsoleRenderer, config: WizardConfig) -> StageResult:
     """Validate database and get stats."""
-    renderer.banner(11, "VALIDATION")
+    renderer.banner(12, "VALIDATION")
     start = time.time()
 
     if config.data_mode == "skip":
@@ -786,7 +885,7 @@ def stage_validation(renderer: ConsoleRenderer, config: WizardConfig) -> StageRe
 
 def stage_mcp_config(renderer: ConsoleRenderer, config: WizardConfig) -> StageResult:
     """Generate MCP configuration."""
-    renderer.banner(12, "MCP CONFIGURATION (OPTIONAL)")
+    renderer.banner(13, "MCP CONFIGURATION (OPTIONAL)")
     start = time.time()
 
     if not config.generate_mcp_config:
@@ -825,7 +924,7 @@ def stage_mcp_config(renderer: ConsoleRenderer, config: WizardConfig) -> StageRe
 
 def stage_testing(renderer: ConsoleRenderer, config: WizardConfig) -> StageResult:
     """Test server import and basic functionality."""
-    renderer.banner(13, "TESTING")
+    renderer.banner(14, "TESTING")
     start = time.time()
 
     try:
@@ -1054,6 +1153,7 @@ Examples:
             ("entity_classification", stage_entity_classification),
             ("sqlite_load", stage_load_sqlite),
             ("embeddings", stage_embeddings),
+            ("derived_indices", stage_derived_indices),
             ("validation", stage_validation),
             ("mcp_config", stage_mcp_config),
             ("testing", stage_testing),
@@ -1068,8 +1168,8 @@ Examples:
                 failed = True
                 break
 
-        # Stage 14: Complete
-        renderer.banner(14, "COMPLETE")
+        # Stage 15: Complete
+        renderer.banner(15, "COMPLETE")
 
         if failed:
             renderer.status("FAIL", "Setup failed")
