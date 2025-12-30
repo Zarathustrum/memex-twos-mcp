@@ -103,7 +103,7 @@ def extract_people_ner(text: str) -> List[str]:
     """
     global _SPACY_MODEL_CACHE
 
-    import spacy
+    import spacy  # type: ignore
 
     # Load model once and cache
     if _SPACY_MODEL_CACHE is None:
@@ -158,7 +158,7 @@ def extract_people_batch_ner(texts: List[str]) -> List[List[str]]:
     """
     global _SPACY_MODEL_CACHE
 
-    import spacy
+    import spacy  # type: ignore
 
     if _SPACY_MODEL_CACHE is None:
         try:
@@ -715,7 +715,7 @@ def parse_twos_file(file_path: Path, use_ner: bool = True) -> Dict[str, Any]:
             # Extract all content texts and strip tags for better NER accuracy
             # Tags like #personal# interfere with spaCy's context analysis
             all_content = [
-                strip_tags_for_ner(task.get("content", "")) for task in tasks
+                strip_tags_for_ner(str(task.get("content", ""))) for task in tasks
             ]
 
             # Batch process with NER
@@ -733,13 +733,13 @@ def parse_twos_file(file_path: Path, use_ner: bool = True) -> Dict[str, Any]:
             )
             for task in tasks:
                 task["people_mentioned"] = extract_people(
-                    task.get("content", ""), use_ner=False
+                    str(task.get("content", "")), use_ner=False
                 )
     else:
         # Regex extraction (use_ner=False)
         for task in tasks:
             task["people_mentioned"] = extract_people(
-                task.get("content", ""), use_ner=False
+                str(task.get("content", "")), use_ner=False
             )
 
     # Compute a date range summary for quick metadata inspection.

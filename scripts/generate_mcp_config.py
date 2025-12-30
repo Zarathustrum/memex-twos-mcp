@@ -216,9 +216,15 @@ def main() -> None:
     print("OK: Configuration updated")
 
     if use_wsl_command:
-        print("\nNOTE: Windows users must restart Claude Desktop for changes to take effect.")
-        print("      If Claude Desktop appears closed but won't restart, you may need to")
-        print("      kill the process in Task Manager (look for 'Claude' or 'claude.exe').")
+        print(
+            "\nNOTE: Windows users must restart Claude Desktop for changes to take effect."
+        )
+        print(
+            "      If Claude Desktop appears closed but won't restart, you may need to"
+        )
+        print(
+            "      kill the process in Task Manager (look for 'Claude' or 'claude.exe')."
+        )
 
 
 if __name__ == "__main__":

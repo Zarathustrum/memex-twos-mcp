@@ -36,9 +36,9 @@ def compute_content_hash(task: Dict[str, Any]) -> str:
     """
     # Use only canonical fields that matter for content identity
     canonical = {
-        'timestamp': task.get('timestamp'),
-        'content': task.get('content', '').strip(),
-        'section_header': task.get('section_header', '').strip(),
+        "timestamp": task.get("timestamp"),
+        "content": task.get("content", "").strip(),
+        "section_header": task.get("section_header", "").strip(),
         # Note: Not including tags/people (they're junction tables, updated separately)
     }
 
@@ -354,7 +354,7 @@ def generate_embeddings(
     conn: sqlite3.Connection,
     tasks: list,
     batch_size: int = 64,
-    show_progress: bool = True
+    show_progress: bool = True,
 ) -> None:
     """
     Generate and store embeddings for all things.
@@ -371,12 +371,13 @@ def generate_embeddings(
     print(f"\n📊 Generating embeddings for {len(tasks)} things...")
 
     # Check if user wants embeddings (environment variable)
-    if os.getenv('MEMEX_DISABLE_EMBEDDINGS') == '1':
+    if os.getenv("MEMEX_DISABLE_EMBEDDINGS") == "1":
         print("⚠️  Embeddings disabled via MEMEX_DISABLE_EMBEDDINGS=1")
         return
 
     try:
         import sys
+
         # Add src to path for imports
         sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
         from memex_twos_mcp.embeddings import EmbeddingGenerator
@@ -397,7 +398,9 @@ def generate_embeddings(
             return
     except Exception as e:
         print(f"⚠️  Could not initialize embeddings: {e}")
-        print("   Skipping embedding generation. Set MEMEX_DISABLE_EMBEDDINGS=1 to silence.")
+        print(
+            "   Skipping embedding generation. Set MEMEX_DISABLE_EMBEDDINGS=1 to silence."
+        )
         return
 
     # Initialize sqlite-vec extension
@@ -407,27 +410,27 @@ def generate_embeddings(
         conn.enable_load_extension(False)
 
         # Create vec_index virtual table
-        conn.execute("""
+        conn.execute(
+            """
             CREATE VIRTUAL TABLE IF NOT EXISTS vec_index USING vec0(
                 thing_id TEXT PRIMARY KEY,
                 embedding float[384]
             )
-        """)
+        """
+        )
         conn.commit()
     except Exception as e:
         print(f"⚠️  Could not initialize vector search: {e}")
         return
 
     # Prepare texts (use content field)
-    texts = [task.get('content', '') for task in tasks]
-    thing_ids = [task['id'] for task in tasks]
+    texts = [task.get("content", "") for task in tasks]
+    thing_ids = [task["id"] for task in tasks]
 
     # Generate embeddings in batches
     try:
         embeddings = embedding_gen.encode_batch(
-            texts,
-            batch_size=batch_size,
-            show_progress=show_progress
+            texts, batch_size=batch_size, show_progress=show_progress
         )
     except Exception as e:
         print(f"⚠️  Embedding generation failed: {e}")
@@ -435,22 +438,28 @@ def generate_embeddings(
 
     # Store in database
     cursor = conn.cursor()
-    print(f"  Storing embeddings...")
+    print("  Storing embeddings...")
     for thing_id, embedding in zip(thing_ids, embeddings):
         # Serialize as float32 bytes for thing_embeddings table
         embedding_blob = embedding.astype(np.float32).tobytes()
 
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO thing_embeddings (thing_id, embedding, model_version)
             VALUES (?, ?, ?)
-        """, (thing_id, embedding_blob, embedding_gen.model_name))
+        """,
+            (thing_id, embedding_blob, embedding_gen.model_name),
+        )
 
         # Also insert into vec_index for fast search
         # vec_index expects the raw bytes directly
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO vec_index (thing_id, embedding)
             VALUES (?, ?)
-        """, (thing_id, embedding_blob))
+        """,
+            (thing_id, embedding_blob),
+        )
 
     conn.commit()
     print(f"✅ Generated and stored {len(embeddings)} embeddings")
@@ -470,21 +479,21 @@ def _insert_thing(cursor, task):
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
         (
-            task['id'],
-            task.get('timestamp'),
-            task.get('content'),
+            task["id"],
+            task.get("timestamp"),
+            task.get("content"),
             content_hash,
-            task.get('timestamp_raw'),
-            task.get('content_raw'),
-            task.get('section_header'),
-            task.get('section_date'),
-            task.get('line_number'),
-            task.get('indent_level', 0),
-            task.get('parent_task_id'),
-            task.get('bullet_type'),
-            task.get('is_completed', False),
-            task.get('is_pending', False),
-            task.get('is_strikethrough', False)
+            task.get("timestamp_raw"),
+            task.get("content_raw"),
+            task.get("section_header"),
+            task.get("section_date"),
+            task.get("line_number"),
+            task.get("indent_level", 0),
+            task.get("parent_task_id"),
+            task.get("bullet_type"),
+            task.get("is_completed", False),
+            task.get("is_pending", False),
+            task.get("is_strikethrough", False),
         ),
     )
 
@@ -494,18 +503,20 @@ def _update_people(conn, tasks: List[Dict]):
     cursor = conn.cursor()
 
     # Clear existing relationships for these tasks
-    task_ids = [t['id'] for t in tasks]
+    task_ids = [t["id"] for t in tasks]
     if task_ids:
-        placeholders = ','.join('?' * len(task_ids))
-        cursor.execute(f"DELETE FROM thing_people WHERE thing_id IN ({placeholders})", task_ids)
+        placeholders = ",".join("?" * len(task_ids))
+        cursor.execute(
+            f"DELETE FROM thing_people WHERE thing_id IN ({placeholders})", task_ids
+        )
 
     # Reinsert
     for task in tasks:
-        for person in task.get('people_mentioned', []):
+        for person in task.get("people_mentioned", []):
             # Insert person if not exists
             cursor.execute(
                 "INSERT OR IGNORE INTO people (name, normalized_name) VALUES (?, ?)",
-                (person, person.lower())
+                (person, person.lower()),
             )
             # Get person ID
             cursor.execute("SELECT id FROM people WHERE name = ?", (person,))
@@ -513,7 +524,7 @@ def _update_people(conn, tasks: List[Dict]):
             # Link to thing
             cursor.execute(
                 "INSERT INTO thing_people (thing_id, person_id) VALUES (?, ?)",
-                (task['id'], person_id)
+                (task["id"], person_id),
             )
 
     conn.commit()
@@ -524,14 +535,16 @@ def _update_tags(conn, tasks: List[Dict]):
     cursor = conn.cursor()
 
     # Clear existing relationships for these tasks
-    task_ids = [t['id'] for t in tasks]
+    task_ids = [t["id"] for t in tasks]
     if task_ids:
-        placeholders = ','.join('?' * len(task_ids))
-        cursor.execute(f"DELETE FROM thing_tags WHERE thing_id IN ({placeholders})", task_ids)
+        placeholders = ",".join("?" * len(task_ids))
+        cursor.execute(
+            f"DELETE FROM thing_tags WHERE thing_id IN ({placeholders})", task_ids
+        )
 
     # Reinsert
     for task in tasks:
-        for tag in task.get('tags', []):
+        for tag in task.get("tags", []):
             # Insert tag if not exists
             cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
             # Get tag ID
@@ -540,7 +553,7 @@ def _update_tags(conn, tasks: List[Dict]):
             # Link to thing
             cursor.execute(
                 "INSERT INTO thing_tags (thing_id, tag_id) VALUES (?, ?)",
-                (task['id'], tag_id)
+                (task["id"], tag_id),
             )
 
     conn.commit()
@@ -551,17 +564,19 @@ def _update_links(conn, tasks: List[Dict]):
     cursor = conn.cursor()
 
     # Clear existing links for these tasks
-    task_ids = [t['id'] for t in tasks]
+    task_ids = [t["id"] for t in tasks]
     if task_ids:
-        placeholders = ','.join('?' * len(task_ids))
-        cursor.execute(f"DELETE FROM links WHERE thing_id IN ({placeholders})", task_ids)
+        placeholders = ",".join("?" * len(task_ids))
+        cursor.execute(
+            f"DELETE FROM links WHERE thing_id IN ({placeholders})", task_ids
+        )
 
     # Reinsert
     for task in tasks:
-        for link in task.get('links', []):
+        for link in task.get("links", []):
             cursor.execute(
                 "INSERT INTO links (thing_id, link_text, url) VALUES (?, ?, ?)",
-                (task['id'], link.get('text'), link.get('url'))
+                (task["id"], link.get("text"), link.get("url")),
             )
 
     conn.commit()
@@ -576,6 +591,7 @@ def _update_embeddings_incremental(conn, tasks: List[Dict]):
     # Check if embeddings are available
     try:
         import sys
+
         sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
         from memex_twos_mcp.embeddings import EmbeddingGenerator
         import numpy as np
@@ -583,7 +599,7 @@ def _update_embeddings_incremental(conn, tasks: List[Dict]):
         return  # Phase 4 not implemented
 
     # Check if disabled via environment
-    if os.getenv('MEMEX_DISABLE_EMBEDDINGS') == '1':
+    if os.getenv("MEMEX_DISABLE_EMBEDDINGS") == "1":
         return
 
     print(f"  Updating embeddings for {len(tasks)} changed things...")
@@ -598,18 +614,19 @@ def _update_embeddings_incremental(conn, tasks: List[Dict]):
         return
 
     # Generate embeddings
-    texts = [task['content'] for task in tasks]
-    thing_ids = [task['id'] for task in tasks]
+    texts = [task["content"] for task in tasks]
+    thing_ids = [task["id"] for task in tasks]
 
     try:
-        embeddings = embedding_gen.encode_batch(texts, show_progress=True, batch_size=64)
+        embeddings = embedding_gen.encode_batch(
+            texts, show_progress=True, batch_size=64
+        )
     except Exception as e:
         print(f"    ⚠️  Embedding generation failed: {e}")
         return
 
     cursor = conn.cursor()
     for thing_id, embedding in zip(thing_ids, embeddings):
-        import numpy as np
         embedding_blob = embedding.astype(np.float32).tobytes()
 
         # Upsert (replace if exists)
@@ -618,7 +635,7 @@ def _update_embeddings_incremental(conn, tasks: List[Dict]):
             INSERT OR REPLACE INTO thing_embeddings (thing_id, embedding, model_version)
             VALUES (?, ?, ?)
         """,
-            (thing_id, embedding_blob, embedding_gen.model_name)
+            (thing_id, embedding_blob, embedding_gen.model_name),
         )
 
         # Also update vec_index (if it exists)
@@ -628,7 +645,7 @@ def _update_embeddings_incremental(conn, tasks: List[Dict]):
                 INSERT OR REPLACE INTO vec_index (thing_id, embedding)
                 VALUES (?, ?)
             """,
-                (thing_id, embedding_blob)
+                (thing_id, embedding_blob),
             )
         except sqlite3.OperationalError:
             # vec_index might not exist, that's ok
@@ -643,7 +660,7 @@ def incremental_load(
     tasks: list,
     source_file: str,
     json_file: str,
-    mode: str = 'append'
+    mode: str = "append",
 ) -> Dict[str, Any]:
     """
     Incrementally load tasks using upsert logic.
@@ -664,6 +681,7 @@ def incremental_load(
         Stats dict: {new_count, updated_count, deleted_count, duration_seconds}
     """
     import time
+
     start_time = time.time()
 
     print(f"\n📊 Incremental load mode: {mode}")
@@ -675,8 +693,8 @@ def incremental_load(
     incoming = {}
     for task in tasks:
         content_hash = compute_content_hash(task)
-        task['content_hash'] = content_hash
-        incoming[task['id']] = (task, content_hash)
+        task["content_hash"] = content_hash
+        incoming[task["id"]] = (task, content_hash)
 
     # Step 2: Fetch existing hashes
     print("  Fetching existing data...")
@@ -685,14 +703,18 @@ def incremental_load(
 
     # Step 3: Categorize changes
     new_ids = set(incoming.keys()) - set(existing.keys())
-    deleted_ids = set(existing.keys()) - set(incoming.keys()) if mode == 'sync' else set()
+    deleted_ids = (
+        set(existing.keys()) - set(incoming.keys()) if mode == "sync" else set()
+    )
 
     updated_ids = set()
     for thing_id in set(incoming.keys()) & set(existing.keys()):
         if incoming[thing_id][1] != existing[thing_id]:
             updated_ids.add(thing_id)
 
-    print(f"  Changes detected: {len(new_ids)} new, {len(updated_ids)} updated, {len(deleted_ids)} deleted")
+    print(
+        f"  Changes detected: {len(new_ids)} new, {len(updated_ids)} updated, {len(deleted_ids)} deleted"
+    )
 
     # Step 4: Apply changes
 
@@ -714,7 +736,7 @@ def incremental_load(
             _insert_thing(cursor, task)
 
     # Delete removed things (sync mode only)
-    if mode == 'sync' and deleted_ids:
+    if mode == "sync" and deleted_ids:
         print(f"  Deleting {len(deleted_ids)} removed things...")
         for thing_id in deleted_ids:
             cursor.execute("DELETE FROM things WHERE id = ?", (thing_id,))
@@ -744,9 +766,15 @@ def incremental_load(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """,
         (
-            source_file, json_file, mode, len(tasks),
-            len(new_ids), len(updated_ids), len(deleted_ids), duration
-        )
+            source_file,
+            json_file,
+            mode,
+            len(tasks),
+            len(new_ids),
+            len(updated_ids),
+            len(deleted_ids),
+            duration,
+        ),
     )
 
     cursor.execute(
@@ -754,7 +782,7 @@ def incremental_load(
         INSERT OR REPLACE INTO metadata (key, value)
         VALUES ('last_incremental_import', ?)
     """,
-        (datetime.now().isoformat(),)
+        (datetime.now().isoformat(),),
     )
 
     conn.commit()
@@ -762,10 +790,10 @@ def incremental_load(
     print(f"✅ Incremental import completed in {duration:.2f}s")
 
     return {
-        'new_count': len(new_ids),
-        'updated_count': len(updated_ids),
-        'deleted_count': len(deleted_ids),
-        'duration_seconds': duration
+        "new_count": len(new_ids),
+        "updated_count": len(updated_ids),
+        "deleted_count": len(deleted_ids),
+        "duration_seconds": duration,
     }
 
 
@@ -865,20 +893,20 @@ def main():
         "--force", action="store_true", help="Overwrite existing database"
     )
     parser.add_argument(
-        '--mode',
-        choices=['rebuild', 'sync', 'append'],
-        default='rebuild',
+        "--mode",
+        choices=["rebuild", "sync", "append"],
+        default="rebuild",
         help=(
             "Import mode: "
             "'rebuild' (delete all, full reload - default), "
             "'sync' (update changed, delete removed), "
             "'append' (insert new only, safest for incremental)"
-        )
+        ),
     )
     parser.add_argument(
-        '--incremental',
-        action='store_true',
-        help="Enable incremental mode (shorthand for --mode=append)"
+        "--incremental",
+        action="store_true",
+        help="Enable incremental mode (shorthand for --mode=append)",
     )
 
     args = parser.parse_args()
@@ -892,19 +920,22 @@ def main():
 
     # Handle --incremental shorthand
     if args.incremental:
-        args.mode = 'append'
+        args.mode = "append"
 
     # Check if database exists
     db_exists = args.output.exists()
 
     # Validate mode and database state
-    if args.mode in ('sync', 'append') and not db_exists:
-        print(f"⚠️  Incremental mode '{args.mode}' requires existing database, switching to 'rebuild'")
-        args.mode = 'rebuild'
-
-    if db_exists and args.mode == 'rebuild' and not args.force:
+    if args.mode in ("sync", "append") and not db_exists:
         print(
-            f"Error: Database {args.output} already exists. Use --force to overwrite or use --mode=sync/append for incremental update."
+            f"⚠️  Incremental mode '{args.mode}' requires existing database, switching to 'rebuild'"
+        )
+        args.mode = "rebuild"
+
+    if db_exists and args.mode == "rebuild" and not args.force:
+        print(
+            f"Error: Database {args.output} already exists. Use --force to overwrite "
+            "or use --mode=sync/append for incremental update."
         )
         return 1
 
@@ -927,14 +958,16 @@ def main():
     metadata = {}
     if isinstance(data, dict) and "tasks" in data:
         tasks = data["tasks"]
-        metadata = data.get("metadata", {}) if isinstance(data.get("metadata"), dict) else {}
+        metadata = (
+            data.get("metadata", {}) if isinstance(data.get("metadata"), dict) else {}
+        )
     else:
         tasks = data
 
     print(f"Found {len(tasks)} things")
 
     # Choose loading strategy based on mode
-    if args.mode == 'rebuild' or not db_exists:
+    if args.mode == "rebuild" or not db_exists:
         # Full rebuild (delete and recreate)
         if db_exists:
             args.output.unlink()
@@ -975,10 +1008,11 @@ def main():
 
         try:
             stats = incremental_load(
-                conn, tasks,
+                conn,
+                tasks,
                 source_file=metadata.get("source_file", ""),
                 json_file=str(args.json_file),
-                mode=args.mode
+                mode=args.mode,
             )
 
             # Update metadata
@@ -989,7 +1023,7 @@ def main():
                 json_file=str(args.json_file),
             )
 
-            print(f"\n📊 Import Statistics:")
+            print("\n📊 Import Statistics:")
             print(f"  New: {stats['new_count']}")
             print(f"  Updated: {stats['updated_count']}")
             print(f"  Deleted: {stats['deleted_count']}")

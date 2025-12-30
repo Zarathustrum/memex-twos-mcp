@@ -32,7 +32,8 @@ def migrate_database(db_path: Path):
 
     # 1. Add embeddings table
     print("  Creating thing_embeddings table...")
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS thing_embeddings (
             thing_id TEXT PRIMARY KEY,
             embedding BLOB NOT NULL,
@@ -40,9 +41,12 @@ def migrate_database(db_path: Path):
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (thing_id) REFERENCES things(id) ON DELETE CASCADE
         )
-    """)
+    """
+    )
 
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_thing ON thing_embeddings(thing_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_embeddings_thing ON thing_embeddings(thing_id)"
+    )
     conn.commit()
 
     # 2. Initialize sqlite-vec extension and create vec_index
@@ -55,12 +59,14 @@ def migrate_database(db_path: Path):
         sqlite_vec.load(conn)
         conn.enable_load_extension(False)
 
-        conn.execute("""
+        conn.execute(
+            """
             CREATE VIRTUAL TABLE IF NOT EXISTS vec_index USING vec0(
                 thing_id TEXT PRIMARY KEY,
                 embedding float[384]
             )
-        """)
+        """
+        )
         conn.commit()
     except ImportError:
         print("❌ sqlite-vec not installed. Install with: pip install sqlite-vec")
@@ -84,12 +90,14 @@ def migrate_database(db_path: Path):
 
         gen = EmbeddingGenerator()
         if not gen.available:
-            print("❌ Embedding model not available. Install with: pip install sentence-transformers")
+            print(
+                "❌ Embedding model not available. Install with: pip install sentence-transformers"
+            )
             conn.close()
             sys.exit(1)
 
-        texts = [thing['content'] for thing in things]
-        thing_ids = [thing['id'] for thing in things]
+        texts = [thing["content"] for thing in things]
+        thing_ids = [thing["id"] for thing in things]
 
         print("  Generating embeddings...")
         embeddings = gen.encode_batch(texts, show_progress=True)
@@ -100,16 +108,22 @@ def migrate_database(db_path: Path):
             embedding_blob = embedding.astype(np.float32).tobytes()
 
             # Insert into thing_embeddings table
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT OR REPLACE INTO thing_embeddings (thing_id, embedding, model_version)
                 VALUES (?, ?, ?)
-            """, (thing_id, embedding_blob, gen.model_name))
+            """,
+                (thing_id, embedding_blob, gen.model_name),
+            )
 
             # Insert into vec_index for fast search
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT OR REPLACE INTO vec_index (thing_id, embedding)
                 VALUES (?, ?)
-            """, (thing_id, embedding_blob))
+            """,
+                (thing_id, embedding_blob),
+            )
 
         conn.commit()
         print("✅ Migration complete!")

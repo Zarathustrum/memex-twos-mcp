@@ -12,6 +12,7 @@ import numpy as np
 
 try:
     from sentence_transformers import SentenceTransformer
+
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
@@ -81,10 +82,7 @@ class EmbeddingGenerator:
         return np.array(embedding, dtype=np.float32)
 
     def encode_batch(
-        self,
-        texts: List[str],
-        batch_size: int = 64,
-        show_progress: bool = True
+        self, texts: List[str], batch_size: int = 64, show_progress: bool = True
     ) -> np.ndarray:
         """
         Encode a batch of texts to normalized embedding vectors.
@@ -105,12 +103,15 @@ class EmbeddingGenerator:
         if not self.available or self.model is None:
             raise RuntimeError("Embedding model not available")
 
+        if not texts:
+            return np.zeros((0, self.dimension), dtype=np.float32)
+
         embeddings = self.model.encode(
             texts,
             batch_size=batch_size,
             show_progress_bar=show_progress,
             normalize_embeddings=True,  # L2 normalization for cosine similarity
-            convert_to_numpy=True
+            convert_to_numpy=True,
         )
 
         return np.array(embeddings, dtype=np.float32)

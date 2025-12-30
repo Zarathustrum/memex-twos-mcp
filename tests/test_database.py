@@ -295,12 +295,28 @@ def test_search_candidates(tmp_path: Path) -> None:
     candidate = candidates[0]
 
     # Verify minimal fields are present
-    required_fields = ["id", "relevance_score", "snippet", "timestamp", "is_completed", "is_strikethrough", "is_pending", "tags", "people"]
+    required_fields = [
+        "id",
+        "relevance_score",
+        "snippet",
+        "timestamp",
+        "is_completed",
+        "is_strikethrough",
+        "is_pending",
+        "tags",
+        "people",
+    ]
     for field in required_fields:
         assert field in candidate, f"Missing required field: {field}"
 
     # Verify heavy fields are NOT present
-    excluded_fields = ["content_raw", "line_number", "indent_level", "parent_task_id", "bullet_type"]
+    excluded_fields = [
+        "content_raw",
+        "line_number",
+        "indent_level",
+        "parent_task_id",
+        "bullet_type",
+    ]
     for field in excluded_fields:
         assert field not in candidate, f"Candidate should not include: {field}"
 
@@ -373,7 +389,16 @@ def test_get_things_by_ids(tmp_path: Path) -> None:
             bullet_type, is_completed, is_pending, is_strikethrough
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        ("task_00001", "2024-01-01T10:00:00", "First thing", "Mon, Jan 1, 2024", "bullet", 0, 0, 0),
+        (
+            "task_00001",
+            "2024-01-01T10:00:00",
+            "First thing",
+            "Mon, Jan 1, 2024",
+            "bullet",
+            0,
+            0,
+            0,
+        ),
     )
 
     conn.execute(
@@ -383,7 +408,16 @@ def test_get_things_by_ids(tmp_path: Path) -> None:
             bullet_type, is_completed, is_pending, is_strikethrough
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        ("task_00002", "2024-01-02T10:00:00", "Second thing", "Tue, Jan 2, 2024", "bullet", 0, 0, 0),
+        (
+            "task_00002",
+            "2024-01-02T10:00:00",
+            "Second thing",
+            "Tue, Jan 2, 2024",
+            "bullet",
+            0,
+            0,
+            0,
+        ),
     )
 
     conn.commit()
@@ -432,7 +466,16 @@ def test_two_phase_retrieval_workflow(tmp_path: Path) -> None:
             bullet_type, is_completed, is_pending, is_strikethrough
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        ("task_00001", "2024-01-01T10:00:00", "Call doctor about checkup", "Mon, Jan 1, 2024", "bullet", 0, 0, 0),
+        (
+            "task_00001",
+            "2024-01-01T10:00:00",
+            "Call doctor about checkup",
+            "Mon, Jan 1, 2024",
+            "bullet",
+            0,
+            0,
+            0,
+        ),
     )
 
     conn.execute(
@@ -442,7 +485,16 @@ def test_two_phase_retrieval_workflow(tmp_path: Path) -> None:
             bullet_type, is_completed, is_pending, is_strikethrough
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        ("task_00002", "2024-01-02T10:00:00", "Pick up prescription from doctor", "Tue, Jan 2, 2024", "bullet", 0, 0, 0),
+        (
+            "task_00002",
+            "2024-01-02T10:00:00",
+            "Pick up prescription from doctor",
+            "Tue, Jan 2, 2024",
+            "bullet",
+            0,
+            0,
+            0,
+        ),
     )
 
     conn.commit()
@@ -483,7 +535,17 @@ def test_query_tasks_by_date_candidates(tmp_path: Path) -> None:
         """
         INSERT INTO things (id, content, timestamp, section_header, bullet_type, is_completed, is_pending, is_strikethrough)
         VALUES
-            ('task_00101', 'November task one with long content that should be truncated in preview to save tokens', '2024-11-15T10:00:00', 'Day 1', 'bullet', 1, 0, 0),
+            (
+                "task_00101",
+                "November task one with long content that should be truncated "
+                "in preview to save tokens",
+                "2024-11-15T10:00:00",
+                "Day 1",
+                "bullet",
+                1,
+                0,
+                0,
+            ),
             ('task_00102', 'November task two', '2024-11-20T10:00:00', 'Day 2', 'bullet', 0, 0, 0),
             ('task_00103', 'December task', '2024-12-05T10:00:00', 'Day 3', 'bullet', 0, 0, 0)
     """

@@ -37,9 +37,7 @@ def check_claude_code() -> bool:
     Returns:
         True if the `claude` executable is on PATH.
     """
-    result = subprocess.run(
-        ["which", "claude"], capture_output=True, text=True
-    )
+    result = subprocess.run(["which", "claude"], capture_output=True, text=True)
     return result.returncode == 0
 
 
@@ -112,16 +110,22 @@ def extract_entities(things: List[Dict[str, Any]]) -> Dict[str, Any]:
     for tag, count in tags_counter.items():
         tags_lower_map[tag.lower()].append((tag, count))
 
-    print(f"  - Found {len(people_counter)} unique people (mentions: {sum(people_counter.values())})")
-    print(f"  - Found {len(tags_counter)} unique tags (uses: {sum(tags_counter.values())})")
-    print(f"  - Case variants: {sum(1 for v in people_lower_map.values() if len(v) > 1)} people, "
-          f"{sum(1 for v in tags_lower_map.values() if len(v) > 1)} tags")
+    print(
+        f"  - Found {len(people_counter)} unique people (mentions: {sum(people_counter.values())})"
+    )
+    print(
+        f"  - Found {len(tags_counter)} unique tags (uses: {sum(tags_counter.values())})"
+    )
+    print(
+        f"  - Case variants: {sum(1 for v in people_lower_map.values() if len(v) > 1)} people, "
+        f"{sum(1 for v in tags_lower_map.values() if len(v) > 1)} tags"
+    )
 
     return {
         "people": people_counter,
         "tags": tags_counter,
         "people_lower_map": people_lower_map,
-        "tags_lower_map": tags_lower_map
+        "tags_lower_map": tags_lower_map,
     }
 
 
@@ -165,18 +169,40 @@ def generate_entity_summary(entities: Dict[str, Any], limit: int = 50) -> str:
         report += f"- **{tag}**: {count:,} uses\n"
 
     # Show case variants
-    people_variants = [(lower, variants) for lower, variants in people_lower_map.items() if len(variants) > 1]
+    people_variants = [
+        (lower, variants)
+        for lower, variants in people_lower_map.items()
+        if len(variants) > 1
+    ]
     if people_variants:
         report += f"\n## People Case Variants ({len(people_variants)} groups)\n\n"
-        for lower, variants in sorted(people_variants, key=lambda x: sum(v[1] for v in x[1]), reverse=True)[:20]:
-            variants_str = ", ".join([f"{v[0]} ({v[1]})" for v in sorted(variants, key=lambda x: x[1], reverse=True)])
+        for lower, variants in sorted(
+            people_variants, key=lambda x: sum(v[1] for v in x[1]), reverse=True
+        )[:20]:
+            variants_str = ", ".join(
+                [
+                    f"{v[0]} ({v[1]})"
+                    for v in sorted(variants, key=lambda x: x[1], reverse=True)
+                ]
+            )
             report += f"- {variants_str}\n"
 
-    tags_variants = [(lower, variants) for lower, variants in tags_lower_map.items() if len(variants) > 1]
+    tags_variants = [
+        (lower, variants)
+        for lower, variants in tags_lower_map.items()
+        if len(variants) > 1
+    ]
     if tags_variants:
         report += f"\n## Tag Case Variants ({len(tags_variants)} groups)\n\n"
-        for lower, variants in sorted(tags_variants, key=lambda x: sum(v[1] for v in x[1]), reverse=True)[:20]:
-            variants_str = ", ".join([f"{v[0]} ({v[1]})" for v in sorted(variants, key=lambda x: x[1], reverse=True)])
+        for lower, variants in sorted(
+            tags_variants, key=lambda x: sum(v[1] for v in x[1]), reverse=True
+        )[:20]:
+            variants_str = ", ".join(
+                [
+                    f"{v[0]} ({v[1]})"
+                    for v in sorted(variants, key=lambda x: x[1], reverse=True)
+                ]
+            )
             report += f"- {variants_str}\n"
 
     report += """
@@ -195,9 +221,7 @@ def generate_entity_summary(entities: Dict[str, Any], limit: int = 50) -> str:
 
 
 def invoke_claude_classification(
-    entities: Dict[str, Any],
-    output_path: Path,
-    timeout_seconds: int = 900
+    entities: Dict[str, Any], output_path: Path, timeout_seconds: int = 900
 ) -> bool:
     """
     Invoke Claude Code to classify entities and generate mapping file.
@@ -216,10 +240,13 @@ def invoke_claude_classification(
     print("   💭 Classifying ~3K entities may take several minutes - please wait...")
 
     # Prepare entity lists for Claude
-    people_list = [{"name": person, "count": count}
-                   for person, count in entities["people"].most_common(200)]
-    tags_list = [{"tag": tag, "count": count}
-                 for tag, count in entities["tags"].most_common(100)]
+    people_list = [
+        {"name": person, "count": count}
+        for person, count in entities["people"].most_common(200)
+    ]
+    tags_list = [
+        {"tag": tag, "count": count} for tag, count in entities["tags"].most_common(100)
+    ]
 
     # Build the classification prompt
     prompt = f"""I need you to classify entities extracted from personal task data.
@@ -286,19 +313,23 @@ Execute this task now without asking for confirmation. Write the complete mappin
             [
                 "claude",
                 "--print",
-                "--tools", "Write",
-                "--allowedTools", "Write",
+                "--tools",
+                "Write",
+                "--allowedTools",
+                "Write",
                 "--dangerously-skip-permissions",
                 "--no-session-persistence",
-                prompt
+                prompt,
             ],
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
-            stdin=subprocess.DEVNULL  # Signal no input coming
+            stdin=subprocess.DEVNULL,  # Signal no input coming
         )
     except subprocess.TimeoutExpired:
-        print(f"❌ Claude Code timed out after {timeout_seconds} seconds ({timeout_seconds//60} minutes)")
+        print(
+            f"❌ Claude Code timed out after {timeout_seconds} seconds ({timeout_seconds//60} minutes)"
+        )
         print(f"   💡 Tip: Increase timeout with --ai-timeout {timeout_seconds * 2}")
         return False
 
@@ -319,8 +350,7 @@ Execute this task now without asking for confirmation. Write the complete mappin
 
 
 def apply_entity_mappings(
-    things: List[Dict[str, Any]],
-    mappings_path: Path
+    things: List[Dict[str, Any]], mappings_path: Path
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Apply entity mappings to create normalized data.
@@ -344,7 +374,7 @@ def apply_entity_mappings(
         "things_processed": 0,
         "people_normalized": 0,
         "people_filtered": 0,  # Removed non-person entities
-        "tags_normalized": 0
+        "tags_normalized": 0,
     }
 
     normalized_things = []
@@ -420,36 +450,36 @@ Examples:
 
   # Full workflow
   python3 scripts/classify_entities.py --ai-classify --apply-mappings
-"""
+""",
     )
     parser.add_argument(
         "json_file",
         type=Path,
         nargs="?",
         default=Path("data/processed/twos_data_cleaned.json"),
-        help="Path to cleaned JSON data file (default: data/processed/twos_data_cleaned.json)"
+        help="Path to cleaned JSON data file (default: data/processed/twos_data_cleaned.json)",
     )
     parser.add_argument(
         "--ai-classify",
         action="store_true",
-        help="Use Claude Code to classify entities (uses subscription quota)"
+        help="Use Claude Code to classify entities (uses subscription quota)",
     )
     parser.add_argument(
         "--apply-mappings",
         action="store_true",
-        help="Apply entity mappings to create normalized data"
+        help="Apply entity mappings to create normalized data",
     )
     parser.add_argument(
         "--entity-limit",
         type=int,
         default=50,
-        help="Number of entities to show in summary report (default: 50)"
+        help="Number of entities to show in summary report (default: 50)",
     )
     parser.add_argument(
         "--ai-timeout",
         type=int,
         default=900,
-        help="Timeout in seconds for AI classification (default: 900 = 15 minutes)"
+        help="Timeout in seconds for AI classification (default: 900 = 15 minutes)",
     )
 
     args = parser.parse_args()
@@ -508,7 +538,9 @@ Examples:
         normalized_things, stats = apply_entity_mappings(things, mappings_path)
 
         # Save normalized data
-        normalized_path = args.json_file.parent / (args.json_file.stem + "_normalized.json")
+        normalized_path = args.json_file.parent / (
+            args.json_file.stem + "_normalized.json"
+        )
 
         # Preserve original structure
         if metadata:
@@ -516,9 +548,9 @@ Examples:
                 "metadata": {
                     **metadata,
                     "normalized_at": datetime.now().isoformat(),
-                    "normalization_stats": stats
+                    "normalization_stats": stats,
                 },
-                "tasks": normalized_things
+                "tasks": normalized_things,
             }
         else:
             output_data = normalized_things
@@ -527,7 +559,7 @@ Examples:
             json.dump(output_data, f, indent=2)
 
         print(f"\n💾 Normalized data saved: {normalized_path}")
-        print(f"\n📁 Next step: Load normalized data into SQLite:")
+        print("\n📁 Next step: Load normalized data into SQLite:")
         print(f"   python3 scripts/load_to_sqlite.py {normalized_path}")
 
     elif not args.ai_classify:

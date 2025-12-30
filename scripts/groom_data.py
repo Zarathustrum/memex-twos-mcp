@@ -15,7 +15,7 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 class GroomingChanges:
@@ -28,7 +28,7 @@ class GroomingChanges:
         self.flagged_not_fixed = {
             "normalization": [],
             "ambiguous_duplicates": [],
-            "long_content": []
+            "long_content": [],
         }
 
     def add_removed(self, thing: Dict[str, Any], reason: str, duplicate_of: str = None):
@@ -40,15 +40,19 @@ class GroomingChanges:
             reason: Short reason string (e.g., "exact_duplicate").
             duplicate_of: Optional ID of the retained item.
         """
-        self.removed.append({
-            "id": thing["id"],
-            "content": thing.get("content", "")[:100],
-            "timestamp": thing.get("timestamp"),
-            "reason": reason,
-            "duplicate_of": duplicate_of
-        })
+        self.removed.append(
+            {
+                "id": thing["id"],
+                "content": thing.get("content", "")[:100],
+                "timestamp": thing.get("timestamp"),
+                "reason": reason,
+                "duplicate_of": duplicate_of,
+            }
+        )
 
-    def add_modified(self, thing_id: str, field: str, old_value: Any, new_value: Any, reason: str):
+    def add_modified(
+        self, thing_id: str, field: str, old_value: Any, new_value: Any, reason: str
+    ):
         """
         Record a modification to a single field.
 
@@ -59,13 +63,15 @@ class GroomingChanges:
             new_value: New value after the change.
             reason: Short reason string explaining why.
         """
-        self.modified.append({
-            "id": thing_id,
-            "field": field,
-            "old_value": old_value,
-            "new_value": new_value,
-            "reason": reason
-        })
+        self.modified.append(
+            {
+                "id": thing_id,
+                "field": field,
+                "old_value": old_value,
+                "new_value": new_value,
+                "reason": reason,
+            }
+        )
 
     def add_flagged(self, category: str, item: Dict[str, Any]):
         """
@@ -87,9 +93,7 @@ def check_claude_code() -> bool:
         True if the `claude` executable is on PATH.
     """
     # Uses the system `which` command; return code 0 means found.
-    result = subprocess.run(
-        ["which", "claude"], capture_output=True, text=True
-    )
+    result = subprocess.run(["which", "claude"], capture_output=True, text=True)
     return result.returncode == 0
 
 
@@ -124,8 +128,7 @@ def load_json_data(json_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any
 
 
 def analyze_duplicates(
-    things: List[Dict[str, Any]],
-    window_days: int
+    things: List[Dict[str, Any]], window_days: int
 ) -> List[Dict[str, Any]]:
     """
     Detect potential duplicate things (same content within time window).
@@ -167,14 +170,16 @@ def analyze_duplicates(
                 seconds_apart = abs((ts2 - ts1).total_seconds())
 
                 if days_apart <= window_days:
-                    duplicates.append({
-                        "content": content,
-                        "items": [item1, item2],
-                        "days_apart": days_apart,
-                        "seconds_apart": seconds_apart,
-                        "is_exact": seconds_apart < 60,  # Within 1 minute = exact
-                        "timestamps": [item1["timestamp"], item2["timestamp"]]
-                    })
+                    duplicates.append(
+                        {
+                            "content": content,
+                            "items": [item1, item2],
+                            "days_apart": days_apart,
+                            "seconds_apart": seconds_apart,
+                            "is_exact": seconds_apart < 60,  # Within 1 minute = exact
+                            "timestamps": [item1["timestamp"], item2["timestamp"]],
+                        }
+                    )
 
     return duplicates
 
@@ -213,33 +218,36 @@ def analyze_normalization(things: List[Dict[str, Any]]) -> Dict[str, Any]:
     for lower, variants in people_lower_map.items():
         if len(variants) > 1:
             variants.sort(key=lambda x: x[1], reverse=True)
-            people_issues.append({
-                "canonical": variants[0][0],
-                "variants": variants,
-                "total_count": sum(v[1] for v in variants)
-            })
+            people_issues.append(
+                {
+                    "canonical": variants[0][0],
+                    "variants": variants,
+                    "total_count": sum(v[1] for v in variants),
+                }
+            )
 
     tags_issues = []
     for lower, variants in tags_lower_map.items():
         if len(variants) > 1:
             variants.sort(key=lambda x: x[1], reverse=True)
-            tags_issues.append({
-                "canonical": variants[0][0],
-                "variants": variants,
-                "total_count": sum(v[1] for v in variants)
-            })
+            tags_issues.append(
+                {
+                    "canonical": variants[0][0],
+                    "variants": variants,
+                    "total_count": sum(v[1] for v in variants),
+                }
+            )
 
     return {
         "people": people_issues,
         "tags": tags_issues,
         "top_people": people_counter.most_common(10),
-        "top_tags": tags_counter.most_common(10)
+        "top_tags": tags_counter.most_common(10),
     }
 
 
 def analyze_data_quality(
-    things: List[Dict[str, Any]],
-    long_threshold: int
+    things: List[Dict[str, Any]], long_threshold: int
 ) -> Dict[str, Any]:
     """
     Check for data quality issues.
@@ -269,18 +277,14 @@ def analyze_data_quality(
         # Orphaned children reference a parent that does not exist.
         parent_id = thing.get("parent_task_id")
         if parent_id and parent_id not in thing_ids:
-            issues["orphaned_children"].append({
-                "id": thing["id"],
-                "parent_id": parent_id
-            })
+            issues["orphaned_children"].append(
+                {"id": thing["id"], "parent_id": parent_id}
+            )
 
         # Unusually long content can indicate a paste or formatting error.
         content = thing.get("content", "")
         if len(content) > long_threshold:
-            issues["unusually_long"].append({
-                "id": thing["id"],
-                "length": len(content)
-            })
+            issues["unusually_long"].append({"id": thing["id"], "length": len(content)})
 
     return {k: v for k, v in issues.items() if v}
 
@@ -289,7 +293,7 @@ def apply_fixes(
     things: List[Dict[str, Any]],
     duplicates: List[Dict[str, Any]],
     quality_issues: Dict[str, Any],
-    changes: GroomingChanges
+    changes: GroomingChanges,
 ) -> List[Dict[str, Any]]:
     """
     Apply automatic fixes to the data.
@@ -308,17 +312,18 @@ def apply_fixes(
             item_to_remove = dup["items"][1]
             ids_to_remove.add(item_to_remove["id"])
             changes.add_removed(
-                item_to_remove,
-                "exact_duplicate",
-                duplicate_of=dup["items"][0]["id"]
+                item_to_remove, "exact_duplicate", duplicate_of=dup["items"][0]["id"]
             )
         else:
             # Flag ambiguous duplicates for review.
-            changes.add_flagged("ambiguous_duplicates", {
-                "content": dup["content"][:60],
-                "items": [i["id"] for i in dup["items"]],
-                "days_apart": dup["days_apart"]
-            })
+            changes.add_flagged(
+                "ambiguous_duplicates",
+                {
+                    "content": dup["content"][:60],
+                    "items": [i["id"] for i in dup["items"]],
+                    "days_apart": dup["days_apart"],
+                },
+            )
 
     # Fix 2: Null out orphaned parent references (do not delete the things).
     orphaned = quality_issues.get("orphaned_children", [])
@@ -330,11 +335,7 @@ def apply_fixes(
             old_parent = thing_dict[thing_id]["parent_task_id"]
             thing_dict[thing_id]["parent_task_id"] = None
             changes.add_modified(
-                thing_id,
-                "parent_task_id",
-                old_parent,
-                None,
-                "orphaned_reference"
+                thing_id, "parent_task_id", old_parent, None, "orphaned_reference"
             )
 
     # Flag long content for review (do not auto-delete).
@@ -348,9 +349,7 @@ def apply_fixes(
 
 
 def generate_changes_report_md(
-    changes: GroomingChanges,
-    original_count: int,
-    cleaned_count: int
+    changes: GroomingChanges, original_count: int, cleaned_count: int
 ) -> str:
     """
     Generate human-readable markdown changes report.
@@ -385,7 +384,7 @@ def generate_changes_report_md(
             report += f"- **Content:** `{item['content']}`\n"
             report += f"- **Timestamp:** {item['timestamp']}\n"
             report += f"- **Reason:** {item['reason']}\n"
-            if item.get('duplicate_of'):
+            if item.get("duplicate_of"):
                 report += f"- **Duplicate of:** {item['duplicate_of']} (kept)\n"
             report += "\n"
     else:
@@ -436,9 +435,7 @@ def generate_changes_report_md(
 
 
 def generate_changes_report_json(
-    changes: GroomingChanges,
-    original_count: int,
-    cleaned_count: int
+    changes: GroomingChanges, original_count: int, cleaned_count: int
 ) -> Dict[str, Any]:
     """
     Generate machine-readable JSON changes report.
@@ -458,11 +455,11 @@ def generate_changes_report_json(
             "original_count": original_count,
             "cleaned_count": cleaned_count,
             "removed_count": len(changes.removed),
-            "modified_count": len(changes.modified)
+            "modified_count": len(changes.modified),
         },
         "removed": changes.removed,
         "modified": changes.modified,
-        "flagged_not_fixed": changes.flagged_not_fixed
+        "flagged_not_fixed": changes.flagged_not_fixed,
     }
 
 
@@ -471,7 +468,7 @@ def generate_python_report(
     duplicates: List[Dict[str, Any]],
     normalization: Dict[str, Any],
     quality_issues: Dict[str, Any],
-    report_limit: int
+    report_limit: int,
 ) -> str:
     """
     Generate markdown report from Python analysis.
@@ -531,37 +528,41 @@ def generate_python_report(
     report += "## Normalization Analysis\n\n"
 
     # People
-    people_issues = normalization['people']
+    people_issues = normalization["people"]
     report += f"### People ({len(people_issues)} normalization opportunities)\n\n"
 
     if people_issues:
         for issue in people_issues[:report_limit]:
-            canonical = issue['canonical']
-            variants_str = ", ".join([f"{v[0]} ({v[1]})" for v in issue['variants']])
+            canonical = issue["canonical"]
+            variants_str = ", ".join([f"{v[0]} ({v[1]})" for v in issue["variants"]])
             report += f"- **{canonical}** ← {variants_str}\n"
-            report += f"  - **Action:** Manual normalization or AI analysis recommended\n"
+            report += (
+                f"  - **Action:** Manual normalization or AI analysis recommended\n"
+            )
     else:
         report += "*No people normalization issues found*\n"
 
     report += "\n### Top People\n\n"
-    for person, count in normalization['top_people']:
+    for person, count in normalization["top_people"]:
         report += f"- {person}: {count:,}\n"
 
     # Tags
-    tags_issues = normalization['tags']
+    tags_issues = normalization["tags"]
     report += f"\n### Tags ({len(tags_issues)} normalization opportunities)\n\n"
 
     if tags_issues:
         for issue in tags_issues[:report_limit]:
-            canonical = issue['canonical']
-            variants_str = ", ".join([f"{v[0]} ({v[1]})" for v in issue['variants']])
+            canonical = issue["canonical"]
+            variants_str = ", ".join([f"{v[0]} ({v[1]})" for v in issue["variants"]])
             report += f"- **{canonical}** ← {variants_str}\n"
-            report += f"  - **Action:** Manual normalization or AI analysis recommended\n"
+            report += (
+                f"  - **Action:** Manual normalization or AI analysis recommended\n"
+            )
     else:
         report += "*No tag normalization issues found*\n"
 
     report += "\n### Top Tags\n\n"
-    for tag, count in normalization['top_tags']:
+    for tag, count in normalization["top_tags"]:
         report += f"- {tag}: {count:,}\n"
 
     # Data Quality
@@ -616,13 +617,13 @@ def analyze_statistics(things: List[Dict[str, Any]]) -> Dict[str, Any]:
         "total_things": len(things),
         "date_range": {
             "earliest": timestamps[0].isoformat() if timestamps else None,
-            "latest": timestamps[-1].isoformat() if timestamps else None
+            "latest": timestamps[-1].isoformat() if timestamps else None,
         },
         "completed": sum(1 for t in things if t.get("is_completed")),
         "strikethrough": sum(1 for t in things if t.get("is_strikethrough")),
         "with_links": sum(1 for t in things if t.get("links")),
         "with_tags": sum(1 for t in things if t.get("tags")),
-        "with_people": sum(1 for t in things if t.get("people_mentioned"))
+        "with_people": sum(1 for t in things if t.get("people_mentioned")),
     }
 
 
@@ -631,7 +632,7 @@ def invoke_claude_analysis(
     python_report_path: Path,
     changes_report_path: Path,
     output_path: Path,
-    timeout_seconds: int = 900
+    timeout_seconds: int = 900,
 ) -> bool:
     """
     Invoke Claude Code for semantic analysis.
@@ -708,19 +709,23 @@ Execute steps 1-3 now without asking for confirmation.
             [
                 "claude",
                 "--print",
-                "--tools", "Read,Write",
-                "--allowedTools", "Read,Write",
+                "--tools",
+                "Read,Write",
+                "--allowedTools",
+                "Read,Write",
                 "--dangerously-skip-permissions",
                 "--no-session-persistence",
-                full_prompt
+                full_prompt,
             ],
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
-            stdin=subprocess.DEVNULL  # Signal no input coming - prevents waiting for stdin
+            stdin=subprocess.DEVNULL,  # Signal no input coming - prevents waiting for stdin
         )
     except subprocess.TimeoutExpired:
-        print(f"❌ Claude Code timed out after {timeout_seconds} seconds ({timeout_seconds//60} minutes)")
+        print(
+            f"❌ Claude Code timed out after {timeout_seconds} seconds ({timeout_seconds//60} minutes)"
+        )
         print(f"   💡 Tip: Increase timeout with --ai-timeout {timeout_seconds * 2}")
         return False
 
@@ -766,43 +771,43 @@ Examples:
 
   # Custom thresholds
   python3 scripts/groom_data.py --duplicate-window 3 --long-content-threshold 1000
-"""
+""",
     )
     parser.add_argument(
         "json_file",
         type=Path,
         nargs="?",
         default=Path("data/processed/twos_data.json"),
-        help="Path to JSON data file (default: data/processed/twos_data.json)"
+        help="Path to JSON data file (default: data/processed/twos_data.json)",
     )
     parser.add_argument(
         "--duplicate-window",
         type=int,
         default=7,
-        help="Days window for duplicate detection (default: 7)"
+        help="Days window for duplicate detection (default: 7)",
     )
     parser.add_argument(
         "--long-content-threshold",
         type=int,
         default=2000,
-        help="Character threshold for flagging long content (default: 2000)"
+        help="Character threshold for flagging long content (default: 2000)",
     )
     parser.add_argument(
         "--report-limit",
         type=int,
         default=10,
-        help="Number of items to show in reports (default: 10)"
+        help="Number of items to show in reports (default: 10)",
     )
     parser.add_argument(
         "--ai-analysis",
         action="store_true",
-        help="Invoke Claude Code for semantic analysis (uses subscription quota)"
+        help="Invoke Claude Code for semantic analysis (uses subscription quota)",
     )
     parser.add_argument(
         "--ai-timeout",
         type=int,
         default=900,
-        help="Timeout in seconds for AI analysis (default: 900 = 15 minutes)"
+        help="Timeout in seconds for AI analysis (default: 900 = 15 minutes)",
     )
 
     args = parser.parse_args()
@@ -826,7 +831,9 @@ Examples:
     original_count = len(things)
 
     # Run Python analysis (no external services).
-    print(f"\n🔍 Running Python analysis (window={args.duplicate_window} days, long={args.long_content_threshold} chars)...")
+    print(
+        f"\n🔍 Running Python analysis (window={args.duplicate_window} days, long={args.long_content_threshold} chars)..."
+    )
 
     stats = analyze_statistics(things)
     duplicates = analyze_duplicates(things, args.duplicate_window)
@@ -836,7 +843,9 @@ Examples:
     print(f"  - Found {len(duplicates)} potential duplicates")
     exact_count = sum(1 for d in duplicates if d["is_exact"])
     print(f"    └─ {exact_count} exact (will be removed)")
-    print(f"  - Found {len(normalization['people'])} people normalization opportunities")
+    print(
+        f"  - Found {len(normalization['people'])} people normalization opportunities"
+    )
     print(f"  - Found {len(normalization['tags'])} tag normalization opportunities")
     print(f"  - Found {len(quality_issues)} data quality issue types")
 
@@ -845,19 +854,25 @@ Examples:
     changes = GroomingChanges()
 
     # Add normalization flags to changes (for reporting).
-    for person_issue in normalization['people']:
-        changes.add_flagged("normalization", {
-            "type": "person",
-            "description": f"{person_issue['canonical']} has {len(person_issue['variants'])} variants",
-            "recommendation": f"Standardize all to '{person_issue['canonical']}'"
-        })
+    for person_issue in normalization["people"]:
+        changes.add_flagged(
+            "normalization",
+            {
+                "type": "person",
+                "description": f"{person_issue['canonical']} has {len(person_issue['variants'])} variants",
+                "recommendation": f"Standardize all to '{person_issue['canonical']}'",
+            },
+        )
 
-    for tag_issue in normalization['tags']:
-        changes.add_flagged("normalization", {
-            "type": "tag",
-            "description": f"{tag_issue['canonical']} has {len(tag_issue['variants'])} variants",
-            "recommendation": f"Standardize all to '{tag_issue['canonical']}'"
-        })
+    for tag_issue in normalization["tags"]:
+        changes.add_flagged(
+            "normalization",
+            {
+                "type": "tag",
+                "description": f"{tag_issue['canonical']} has {len(tag_issue['variants'])} variants",
+                "recommendation": f"Standardize all to '{tag_issue['canonical']}'",
+            },
+        )
 
     cleaned_things = apply_fixes(things, duplicates, quality_issues, changes)
     cleaned_count = len(cleaned_things)
@@ -876,9 +891,9 @@ Examples:
                 **metadata,
                 "cleaned_at": datetime.now().isoformat(),
                 "original_count": original_count,
-                "cleaned_count": cleaned_count
+                "cleaned_count": cleaned_count,
             },
-            "tasks": cleaned_things
+            "tasks": cleaned_things,
         }
     else:
         output_data = cleaned_things
@@ -927,7 +942,7 @@ Examples:
             python_report_path,
             changes_md_path,
             ai_report_path,
-            args.ai_timeout
+            args.ai_timeout,
         )
         if not success:
             print("\n⚠️  AI analysis failed, but cleaned data and reports are available")
@@ -943,9 +958,13 @@ Examples:
         print("   See: docs/grooming-reports/*-ai-analysis.md")
         print("\n💡 Recommended workflow:")
         print("\n   1. Classify entities (improves query accuracy ~40%):")
-        print("      python3 scripts/classify_entities.py --ai-classify --apply-mappings")
+        print(
+            "      python3 scripts/classify_entities.py --ai-classify --apply-mappings"
+        )
         print("\n   2. Then load normalized data to SQLite:")
-        print("      python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned_normalized.json")
+        print(
+            "      python3 scripts/load_to_sqlite.py data/processed/twos_data_cleaned_normalized.json"
+        )
         print("\n   OR skip entity classification and load cleaned data now:")
         print(f"      python3 scripts/load_to_sqlite.py {cleaned_path}")
     else:

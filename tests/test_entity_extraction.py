@@ -7,7 +7,11 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from convert_to_json import extract_people, extract_people_ner, extract_people_batch_ner
+from convert_to_json import (  # noqa: E402
+    extract_people,
+    extract_people_ner,
+    extract_people_batch_ner,
+)
 
 
 class TestPeopleExtractionRegex:
@@ -251,7 +255,7 @@ class TestEdgeCases:
 
     def test_names_in_links(self):
         """Handle names in markdown links."""
-        result = extract_people(
+        _ = extract_people(
             "Contact [John Smith](mailto:john@example.com)", use_ner=False
         )
         # Regex removes links first, so may not extract from link text
@@ -259,13 +263,13 @@ class TestEdgeCases:
 
     def test_mixed_case_names(self):
         """Handle mixed case."""
-        result = extract_people("Meeting with ALICE", use_ner=False)
+        _ = extract_people("Meeting with ALICE", use_ner=False)
         # Regex looks for proper case, so ALICE might not match
         # This is a known limitation
 
     def test_unicode_names(self):
         """Handle unicode characters."""
-        result = extract_people("Called José about project", use_ner=False)
+        _ = extract_people("Called José about project", use_ner=False)
         # Regex may not handle accented characters well
         # This is a known limitation
 

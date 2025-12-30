@@ -114,9 +114,7 @@ class QueryCache:
         """
         with self._lock:
             total_requests = self._hits + self._misses
-            hit_rate = (
-                (self._hits / total_requests * 100) if total_requests > 0 else 0
-            )
+            hit_rate = (self._hits / total_requests * 100) if total_requests > 0 else 0
 
             return {
                 "cache_size": len(self._cache),

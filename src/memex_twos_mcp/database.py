@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
-    import sqlite_vec
+    import sqlite_vec  # type: ignore
+
     SQLITE_VEC_AVAILABLE = True
 except ImportError:
     SQLITE_VEC_AVAILABLE = False
@@ -47,6 +48,7 @@ class TwosDatabase:
         self.embedding_gen = None
         try:
             from .embeddings import EmbeddingGenerator
+
             self.embedding_gen = EmbeddingGenerator()
             if self.embedding_gen.available:
                 self.embeddings_enabled = True
@@ -71,7 +73,8 @@ class TwosDatabase:
         with self._lock:
             if self._connection is None:
                 self._connection = sqlite3.connect(
-                    self.db_path, check_same_thread=False  # Allow multi-thread with lock
+                    self.db_path,
+                    check_same_thread=False,  # Allow multi-thread with lock
                 )
                 self._connection.row_factory = sqlite3.Row
             return self._connection
@@ -103,12 +106,14 @@ class TwosDatabase:
             conn.enable_load_extension(False)
 
             # Create virtual table for vector search
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE VIRTUAL TABLE IF NOT EXISTS vec_index USING vec0(
                     thing_id TEXT PRIMARY KEY,
                     embedding float[384]
                 )
-            """)
+            """
+            )
             conn.commit()
         except Exception as e:
             print(f"⚠️  Vector search unavailable: {e}")
@@ -253,7 +258,9 @@ class TwosDatabase:
             results.append(result)
 
         # Cache the results
-        self.cache.set(f"date_query:{start_date}:{end_date}", results, **cache_key_parts)
+        self.cache.set(
+            f"date_query:{start_date}:{end_date}", results, **cache_key_parts
+        )
 
         return results
 
@@ -304,9 +311,7 @@ class TwosDatabase:
                 f"Tip: Use AND, OR, NOT operators, or quote phrases."
             ) from e
 
-    def search_candidates(
-        self, query: str, limit: int = 50
-    ) -> List[Dict[str, Any]]:
+    def search_candidates(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
         Search for things and return minimal candidate previews (two-phase retrieval).
 
@@ -328,6 +333,9 @@ class TwosDatabase:
         Raises:
             ValueError: If the FTS5 query syntax is invalid
         """
+        if not query or not query.strip():
+            return []
+
         # Check cache first
         cached = self.cache.get(query, limit=limit)
         if cached is not None:
@@ -448,9 +456,7 @@ class TwosDatabase:
         cursor.execute(
             "SELECT link_text, url FROM links WHERE thing_id = ?", (thing_id,)
         )
-        result["links"] = [
-            {"text": row[0], "url": row[1]} for row in cursor.fetchall()
-        ]
+        result["links"] = [{"text": row[0], "url": row[1]} for row in cursor.fetchall()]
 
         # Note: Connection is persistent, no need to close
         return result
@@ -691,7 +697,7 @@ class TwosDatabase:
         lexical_weight: float = 0.5,
         semantic_weight: float = 0.5,
         rrf_k: int = 60,
-        enable_semantic: bool = True
+        enable_semantic: bool = True,
     ) -> List[Dict[str, Any]]:
         """
         Hybrid search combining BM25 (lexical) + vector similarity (semantic).
@@ -711,12 +717,12 @@ class TwosDatabase:
             List of candidate dictionaries with hybrid_score field
         """
         # Phase 1: BM25 lexical search
-        lexical_results = self.search_candidates(query, limit=limit*2)
+        lexical_results = self.search_candidates(query, limit=limit * 2)
 
         # Phase 2: Vector semantic search (if enabled)
         if enable_semantic and self.embeddings_enabled:
             try:
-                semantic_results = self._vector_search(query, limit=limit*2)
+                semantic_results = self._vector_search(query, limit=limit * 2)
             except Exception as e:
                 print(f"⚠️  Semantic search failed, falling back to lexical: {e}")
                 semantic_results = []
@@ -729,13 +735,13 @@ class TwosDatabase:
 
         # Add lexical scores
         for rank, result in enumerate(lexical_results, start=1):
-            thing_id = result['id']
+            thing_id = result["id"]
             thing_scores[thing_id] = lexical_weight / (rrf_k + rank)
             thing_data[thing_id] = result
 
         # Add semantic scores
         for rank, result in enumerate(semantic_results, start=1):
-            thing_id = result['id']
+            thing_id = result["id"]
             thing_scores[thing_id] = thing_scores.get(thing_id, 0) + (
                 semantic_weight / (rrf_k + rank)
             )
@@ -748,7 +754,7 @@ class TwosDatabase:
         results = []
         for thing_id, hybrid_score in ranked:
             result = thing_data[thing_id].copy()
-            result['hybrid_score'] = hybrid_score
+            result["hybrid_score"] = hybrid_score
             results.append(result)
 
         return results
@@ -777,14 +783,17 @@ class TwosDatabase:
         # Convert embedding to bytes for SQLite storage
         embedding_bytes = query_embedding.tobytes()
 
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT
                 v.thing_id,
                 vec_distance_cosine(v.embedding, ?) AS distance
             FROM vec_index v
             ORDER BY distance ASC
             LIMIT ?
-        """, (embedding_bytes, limit))
+        """,
+            (embedding_bytes, limit),
+        )
 
         # Fetch thing metadata for results
         results = []
@@ -793,7 +802,7 @@ class TwosDatabase:
             thing = self.get_thing_by_id(thing_id)
             if thing:
                 # Convert distance to similarity (cosine distance = 1 - similarity)
-                thing['cosine_similarity'] = 1 - distance
+                thing["cosine_similarity"] = 1 - distance
                 results.append(thing)
 
         return results

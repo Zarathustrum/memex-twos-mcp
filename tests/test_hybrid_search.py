@@ -2,9 +2,12 @@
 
 import pytest
 import sqlite3
-import os
-from pathlib import Path
 from memex_twos_mcp.database import TwosDatabase
+
+try:
+    import sqlite_vec
+except ImportError:
+    sqlite_vec = None
 
 
 def create_test_db(tmp_path):
@@ -21,7 +24,8 @@ def create_test_db(tmp_path):
     conn = sqlite3.connect(db_path)
 
     # Create minimal schema
-    conn.executescript("""
+    conn.executescript(
+        """
         CREATE TABLE things (
             id TEXT PRIMARY KEY,
             content TEXT NOT NULL,
@@ -67,7 +71,8 @@ def create_test_db(tmp_path):
             person_id INTEGER,
             PRIMARY KEY (thing_id, person_id)
         );
-    """)
+    """
+    )
 
     # Insert sample data
     cursor = conn.cursor()
@@ -82,11 +87,11 @@ def create_test_db(tmp_path):
     for thing_id, content, timestamp in sample_things:
         cursor.execute(
             "INSERT INTO things (id, content, timestamp) VALUES (?, ?, ?)",
-            (thing_id, content, timestamp)
+            (thing_id, content, timestamp),
         )
         cursor.execute(
             "INSERT INTO things_fts (thing_id, content) VALUES (?, ?)",
-            (thing_id, content)
+            (thing_id, content),
         )
 
     conn.commit()
@@ -104,9 +109,9 @@ def test_hybrid_search_fallback(tmp_path):
     results = db.hybrid_search("doctor", limit=10, enable_semantic=False)
 
     assert len(results) > 0
-    assert 'hybrid_score' in results[0]
+    assert "hybrid_score" in results[0]
     # Should find "doctor appointment" and "dentist"
-    assert any("doctor" in r.get('content', '').lower() for r in results)
+    assert any("doctor" in r.get("snippet", "").lower() for r in results)
 
 
 def test_hybrid_search_with_embeddings(tmp_path):
@@ -116,7 +121,6 @@ def test_hybrid_search_with_embeddings(tmp_path):
     # Check if embeddings available
     try:
         from memex_twos_mcp.embeddings import EmbeddingGenerator
-        import sqlite_vec
 
         gen = EmbeddingGenerator()
         if not gen.available:
@@ -130,7 +134,13 @@ def test_hybrid_search_with_embeddings(tmp_path):
         pytest.skip("Embeddings not enabled in database")
 
     # Generate embeddings for test data
+    import sqlite_vec
+
     conn = sqlite3.connect(db_path)
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
+
     cursor = conn.cursor()
     cursor.execute("SELECT id, content FROM things")
     things = cursor.fetchall()
@@ -147,11 +157,11 @@ def test_hybrid_search_with_embeddings(tmp_path):
         embedding_blob = embedding.astype(np.float32).tobytes()
         cursor.execute(
             "INSERT INTO thing_embeddings (thing_id, embedding, model_version) VALUES (?, ?, ?)",
-            (thing_id, embedding_blob, gen.model_name)
+            (thing_id, embedding_blob, gen.model_name),
         )
         cursor.execute(
             "INSERT INTO vec_index (thing_id, embedding) VALUES (?, ?)",
-            (thing_id, embedding_blob)
+            (thing_id, embedding_blob),
         )
 
     conn.commit()
@@ -161,7 +171,7 @@ def test_hybrid_search_with_embeddings(tmp_path):
     results = db.hybrid_search("meeting", limit=10)
 
     assert len(results) > 0
-    assert 'hybrid_score' in results[0]
+    assert "hybrid_score" in results[0]
 
 
 def test_hybrid_search_weights(tmp_path):
@@ -171,14 +181,11 @@ def test_hybrid_search_weights(tmp_path):
 
     # Lexical-only (semantic_weight=0)
     lexical_only = db.hybrid_search(
-        "doctor",
-        limit=10,
-        lexical_weight=1.0,
-        semantic_weight=0.0
+        "doctor", limit=10, lexical_weight=1.0, semantic_weight=0.0
     )
 
     assert len(lexical_only) > 0
-    assert all('hybrid_score' in r for r in lexical_only)
+    assert all("hybrid_score" in r for r in lexical_only)
 
 
 def test_hybrid_search_empty_query(tmp_path):

@@ -146,14 +146,14 @@ async def list_tools() -> list[Tool]:
                 "⚠️ For conceptual queries (e.g., 'health-related', 'work stuff', 'things about moving'), "
                 "use semantic_search instead - it understands meaning and finds related content. "
                 "Returns FULL records with relevance_score and highlighted snippets. "
-                "Supports FTS5 operators: AND, OR, NOT, \"phrase queries\"."
+                'Supports FTS5 operators: AND, OR, NOT, "phrase queries".'
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query (supports FTS5 syntax: AND, OR, NOT, \"phrase queries\")",
+                        "description": 'Search query (supports FTS5 syntax: AND, OR, NOT, "phrase queries")',
                     },
                     "limit": {
                         "type": "integer",
@@ -178,7 +178,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query (supports FTS5 syntax: AND, OR, NOT, \"phrase queries\")",
+                        "description": 'Search query (supports FTS5 syntax: AND, OR, NOT, "phrase queries")',
                     },
                     "limit": {
                         "type": "integer",
@@ -305,26 +305,26 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Conceptual search query (natural language describing what you're looking for)"
+                        "description": "Conceptual search query (natural language describing what you're looking for)",
                     },
                     "limit": {
                         "type": "integer",
                         "description": "Maximum results (default: 50)",
-                        "default": 50
+                        "default": 50,
                     },
                     "lexical_weight": {
                         "type": "number",
                         "description": "Weight for keyword matching (0-1, default: 0.5)",
-                        "default": 0.5
+                        "default": 0.5,
                     },
                     "semantic_weight": {
                         "type": "number",
                         "description": "Weight for semantic similarity (0-1, default: 0.5)",
-                        "default": 0.5
-                    }
+                        "default": 0.5,
+                    },
                 },
-                "required": ["query"]
-            }
+                "required": ["query"],
+            },
         ),
     ]
 
@@ -361,7 +361,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 query=arguments["query"], limit=arguments.get("limit", 50)
             )
             return [
-                TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+                TextContent(
+                    type="text", text=json.dumps(results, indent=2, default=str)
+                )
             ]
         except ValueError as e:
             # Invalid FTS5 query syntax - return helpful error
@@ -470,10 +472,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             query,
             limit=limit,
             lexical_weight=lexical_weight,
-            semantic_weight=semantic_weight
+            semantic_weight=semantic_weight,
         )
 
-        return [TextContent(type="text", text=json.dumps(results, indent=2, default=str))]
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
 
     else:
         raise ValueError(f"Unknown tool: {name}")

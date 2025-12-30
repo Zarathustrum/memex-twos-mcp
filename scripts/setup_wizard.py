@@ -230,11 +230,7 @@ def convert_and_load_data(data_type: str | None) -> None:
     print("Recommended for first-time setup and regular data refreshes.")
     print()
 
-    response = input_with_timeout(
-        "Run data grooming? (Y/n)",
-        default="y",
-        timeout=10
-    )
+    response = input_with_timeout("Run data grooming? (Y/n)", default="y", timeout=10)
 
     json_file = "data/processed/twos_data.json"  # Default: use original
 
@@ -251,14 +247,14 @@ def convert_and_load_data(data_type: str | None) -> None:
         print("\n" + "-" * 60)
         print("AI Semantic Analysis (Optional)")
         print("-" * 60)
-        print("Provides pattern detection, theme categorization, and schema recommendations.")
+        print(
+            "Provides pattern detection, theme categorization, and schema recommendations."
+        )
         print("WARNING: Uses Claude Code subscription quota and takes 1-2 minutes.")
         print()
 
         ai_response = input_with_timeout(
-            "Run AI semantic analysis? (y/N)",
-            default="n",
-            timeout=10
+            "Run AI semantic analysis? (y/N)", default="n", timeout=10
         )
 
         if ai_response.lower() in ["y", "yes"]:
@@ -286,29 +282,36 @@ def convert_and_load_data(data_type: str | None) -> None:
 
             # No timeout here - user just waited 2-5 min for AI analysis
             # They need to make an explicit choice, not auto-default
-            classify_response = input("Run entity classification? (y/N): ").strip().lower()
+            classify_response = (
+                input("Run entity classification? (y/N): ").strip().lower()
+            )
 
             if classify_response.lower() in ["y", "yes"]:
                 print("\nClassifying and normalizing entities...")
                 # Side effect: writes entity_mappings.json and normalized JSON
-                subprocess.run([
-                    sys.executable,
-                    "scripts/classify_entities.py",
-                    json_file,
-                    "--ai-classify",
-                    "--apply-mappings"
-                ], check=True)
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "scripts/classify_entities.py",
+                        json_file,
+                        "--ai-classify",
+                        "--apply-mappings",
+                    ],
+                    check=True,
+                )
                 json_file = "data/processed/twos_data_cleaned_normalized.json"
-                print(f"OK: Entities classified and normalized")
+                print("OK: Entities classified and normalized")
                 print(f"   Using normalized data: {json_file}")
             else:
                 print("SKIP: Entity classification")
-                print("   (You can run this later with: python scripts/classify_entities.py --ai-classify)")
+                print(
+                    "   (You can run this later with: python scripts/classify_entities.py --ai-classify)"
+                )
     else:
         print("SKIP: Data grooming (using original data)")
 
     # Step 5c: Load to SQLite
-    print(f"\nLoading data into SQLite...")
+    print("\nLoading data into SQLite...")
     # Side effect: creates/overwrites the SQLite database file.
     load_args = [
         sys.executable,
