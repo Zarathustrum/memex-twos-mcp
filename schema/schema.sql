@@ -307,3 +307,53 @@ CREATE TABLE IF NOT EXISTS month_summary_evidence (
 
 CREATE INDEX IF NOT EXISTS idx_month_summaries_start ON month_summaries(start_date);
 CREATE INDEX IF NOT EXISTS idx_month_evidence_role ON month_summary_evidence(month_id, role, rank);
+
+-- ============================================================================
+-- ThreadPacks: Active Tag/Person Thread Indices (Phase 9)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS threads (
+    thread_id TEXT PRIMARY KEY,        -- 'thr:tag:work' | 'thr:person:alice'
+    kind TEXT NOT NULL CHECK(kind IN ('tag','person')),
+    label TEXT NOT NULL,               -- Display: 'work' | 'Alice'
+    label_norm TEXT NOT NULL,          -- Lowercase: 'work' | 'alice'
+
+    start_ts TEXT,                     -- First thing timestamp
+    last_ts TEXT,                      -- Most recent thing timestamp
+    thing_count INTEGER NOT NULL,      -- Total things in thread
+    thing_count_90d INTEGER NOT NULL,  -- Things in last 90 days
+    status TEXT NOT NULL CHECK(status IN ('active','stale','archived')),
+    archived_at TEXT,                  -- When thread was archived (NULL if active/stale)
+
+    pack_v INTEGER NOT NULL,           -- Pack format version (1)
+    pack TEXT NOT NULL,                -- TH1 format (spec below)
+    kw TEXT NOT NULL,                  -- Space-separated keywords for search
+
+    src_hash TEXT NOT NULL,            -- Hash of (thing_id + content_hash) in thread
+    builder_v TEXT NOT NULL,           -- '1.0' or git sha
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_threads_status_last ON threads(status, last_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_threads_kind_label ON threads(kind, label_norm);
+
+CREATE TABLE IF NOT EXISTS thread_evidence (
+    thread_id TEXT NOT NULL,
+    thing_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('hi','ev')),  -- hi=highlight, ev=evidence
+    rank INTEGER,
+    PRIMARY KEY (thread_id, thing_id, role),
+    FOREIGN KEY (thread_id) REFERENCES threads(thread_id) ON DELETE CASCADE,
+    FOREIGN KEY (thing_id) REFERENCES things(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_thread_evidence_thread_role ON thread_evidence(thread_id, role, rank);
+
+-- FTS for thread search
+CREATE VIRTUAL TABLE IF NOT EXISTS threads_fts USING fts5(
+    thread_id UNINDEXED,
+    label,
+    kw,
+    tokenize='porter unicode61'
+);

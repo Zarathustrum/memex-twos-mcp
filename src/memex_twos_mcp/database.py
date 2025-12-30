@@ -1356,3 +1356,149 @@ class TwosDatabase:
             return questions_data.get("questions", [])
         except json.JSONDecodeError:
             return []
+
+    # ========================================================================
+    # ThreadPacks: Active Tag/Person Thread Indices (Phase 9)
+    # ========================================================================
+
+    def list_threads(
+        self,
+        status: str = "active",
+        kind: Optional[str] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        List threads filtered by status and kind.
+
+        Args:
+            status: Filter by status ('active', 'stale', 'archived', or 'all')
+            kind: Filter by kind ('tag', 'person', or None for all)
+            limit: Maximum results
+
+        Returns:
+            List of thread dictionaries
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM threads WHERE 1=1"
+        params: List[Any] = []
+
+        if status != "all":
+            query += " AND status = ?"
+            params.append(status)
+
+        if kind:
+            query += " AND kind = ?"
+            params.append(kind)
+
+        query += " ORDER BY last_ts DESC LIMIT ?"
+        params.append(limit)
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results
+
+    def search_threads(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Search threads using FTS.
+
+        Args:
+            query: Search query (FTS5 syntax)
+            limit: Maximum results
+
+        Returns:
+            List of matching thread dictionaries
+
+        Raises:
+            ValueError: If FTS5 query syntax is invalid
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            # Search threads_fts and join with threads table
+            cursor.execute(
+                """
+                SELECT t.*,
+                       bm25(threads_fts) AS relevance_score
+                FROM threads t
+                JOIN threads_fts fts ON t.thread_id = fts.thread_id
+                WHERE threads_fts MATCH ?
+                ORDER BY bm25(threads_fts)
+                LIMIT ?
+                """,
+                (query, limit)
+            )
+
+            results = [dict(row) for row in cursor.fetchall()]
+            return results
+
+        except sqlite3.OperationalError as e:
+            raise ValueError(
+                f"Invalid FTS5 query syntax: {query}. Error: {str(e)}"
+            ) from e
+
+    def get_thread(self, thread_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a single thread by ID.
+
+        Args:
+            thread_id: Thread identifier (e.g., 'thr:tag:work')
+
+        Returns:
+            Thread dictionary or None
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM threads WHERE thread_id = ?", (thread_id,))
+        row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return dict(row)
+
+    def get_thread_highlights(
+        self,
+        thread_id: str,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Get full thing objects for thread highlights.
+
+        Args:
+            thread_id: Thread identifier
+            limit: Maximum highlights to return
+
+        Returns:
+            List of thing dictionaries (highlights only)
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Fetch highlight thing_ids with rank
+        cursor.execute(
+            """
+            SELECT thing_id, rank
+            FROM thread_evidence
+            WHERE thread_id = ? AND role = 'hi'
+            ORDER BY rank
+            LIMIT ?
+            """,
+            (thread_id, limit)
+        )
+
+        highlight_ids = [(row[0], row[1]) for row in cursor.fetchall()]
+
+        # Fetch full thing objects
+        results = []
+        for thing_id, rank in highlight_ids:
+            thing = self.get_thing_by_id(thing_id)
+            if thing:
+                thing["highlight_rank"] = rank
+                results.append(thing)
+
+        return results

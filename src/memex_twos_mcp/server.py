@@ -554,6 +554,100 @@ async def list_tools() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="list_threads",
+            description=(
+                "⭐ List active tag and person threads. "
+                "Perfect for 'what's active with work?' or 'show me active people' queries. "
+                "Returns threads sorted by most recent activity."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by status: 'active' (default), 'stale', 'archived', or 'all'",
+                        "default": "active",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Filter by kind: 'tag', 'person', or None for all",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 20)",
+                        "default": 20,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="search_threads",
+            description=(
+                "Search threads by keyword using FTS. "
+                "Searches thread labels and keywords. "
+                "Example: 'health', 'alice', 'work planning'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (FTS5 syntax)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 20)",
+                        "default": 20,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="get_thread",
+            description=(
+                "Get detailed information about a specific thread. "
+                "Returns thread metadata with activity stats and highlights."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "thread_id": {
+                        "type": "string",
+                        "description": "Thread ID (e.g., 'thr:tag:work', 'thr:person:alice')",
+                    },
+                    "include_highlights": {
+                        "type": "boolean",
+                        "description": "Include full thing objects for highlights (default: false)",
+                        "default": False,
+                    },
+                },
+                "required": ["thread_id"],
+            },
+        ),
+        Tool(
+            name="get_thread_highlights",
+            description=(
+                "Get recent highlights for a thread. "
+                "Returns the most important recent items for a tag or person."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "thread_id": {
+                        "type": "string",
+                        "description": "Thread ID (e.g., 'thr:tag:work')",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum highlights (default: 10)",
+                        "default": 10,
+                    },
+                },
+                "required": ["thread_id"],
+            },
+        ),
     ]
 
 
@@ -882,6 +976,87 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         return [
             TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "list_threads":
+        status = arguments.get("status", "active")
+        kind = arguments.get("kind")
+        limit = arguments.get("limit", 20)
+
+        results = database.list_threads(
+            status=status,
+            kind=kind,
+            limit=limit
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "search_threads":
+        query = arguments["query"]
+        limit = arguments.get("limit", 20)
+
+        try:
+            results = database.search_threads(query=query, limit=limit)
+            return [
+                TextContent(
+                    type="text", text=json.dumps(results, indent=2, default=str)
+                )
+            ]
+        except ValueError as e:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Invalid search query",
+                            "message": str(e),
+                            "query": query,
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+
+    elif name == "get_thread":
+        thread_id = arguments["thread_id"]
+        include_highlights = arguments.get("include_highlights", False)
+
+        thread = database.get_thread(thread_id)
+
+        if thread is None:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Thread not found",
+                            "thread_id": thread_id,
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+
+        # Optionally include full highlight objects
+        if include_highlights:
+            thread["highlights"] = database.get_thread_highlights(thread_id)
+
+        return [
+            TextContent(type="text", text=json.dumps(thread, indent=2, default=str))
+        ]
+
+    elif name == "get_thread_highlights":
+        thread_id = arguments["thread_id"]
+        limit = arguments.get("limit", 10)
+
+        highlights = database.get_thread_highlights(thread_id, limit=limit)
+
+        return [
+            TextContent(
+                type="text", text=json.dumps(highlights, indent=2, default=str)
+            )
         ]
 
     else:
