@@ -1058,6 +1058,7 @@ Examples:
   # Jump to specific stage (for testing/debugging)
   python scripts/setup_wizard.py --jump
   # Shows numbered stage list, then prompts for selection (e.g., "10" for derived indices)
+  # Jump mode enables all execution flags by default (AI analysis, entity classification, LLM summaries)
         """,
     )
 
@@ -1243,24 +1244,28 @@ Examples:
             config = collect_configuration(renderer, args)
             renderer = ConsoleRenderer(config)  # Recreate with actual config
         else:
-            # Jumping mode: use non-interactive config from CLI args
+            # Jumping mode: Developer/testing mode - default all execution flags to True
+            # unless explicitly disabled via CLI flags
+            # This ensures stages actually run when jumping to them for testing
             config = WizardConfig(
                 non_interactive=True,
                 verbose=args.verbose,
                 no_color=args.no_color,
                 export_file=args.export_file,
                 claude_config_path=args.claude_config,
-                install_deps=args.install_deps,
-                run_grooming=args.groom,
-                run_ai_analysis=args.ai_analysis,
-                run_entity_classification=args.classify_entities,
-                overwrite_db=args.overwrite_db,
-                build_derived_indices=True,  # Default to true for jump mode
-                build_with_llm=False,  # Default to false (can override with future flag)
-                generate_mcp_config=args.generate_mcp_config,
+                create_venv=args.create_venv,  # Respect explicit choice
+                install_deps=args.install_deps,  # Defaults to True
+                run_grooming=args.groom,  # Defaults to True
+                run_ai_analysis=True,  # Jump mode: enable AI by default for testing
+                run_entity_classification=True,  # Jump mode: enable entities by default
+                overwrite_db=args.overwrite_db,  # Defaults to True
+                build_derived_indices=True,  # Jump mode: always build indices
+                build_with_llm=True,  # Jump mode: enable LLM summaries for testing
+                generate_mcp_config=args.generate_mcp_config,  # Defaults to True
             )
             renderer = ConsoleRenderer(config)
-            print("  Using non-interactive mode with CLI defaults for jumped execution\n")
+            print("  Jump mode (dev/testing): All execution flags enabled by default")
+            print("  Use --skip-* flags to disable specific stages if needed\n")
 
         # Execute stages starting from selected index
         failed = False
