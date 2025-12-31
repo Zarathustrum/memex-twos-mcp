@@ -1113,5 +1113,15 @@ async def main():
             print("Database connection closed.", file=sys.stderr)
 
 
-if __name__ == "__main__":
+def run():
+    """
+    Synchronous entry point for console script.
+
+    This wrapper allows the package to be installed as a console script
+    via pyproject.toml while maintaining an async main() implementation.
+    """
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run()

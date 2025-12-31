@@ -4,6 +4,7 @@ Provides safe query methods for MCP tools.
 """
 
 import sqlite3
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -55,7 +56,7 @@ class TwosDatabase:
                 # Initialize vector search extension
                 self._init_vector_search()
         except Exception as e:
-            print(f"⚠️  Embeddings disabled: {e}")
+            print(f"⚠️  Embeddings disabled: {e}", file=sys.stderr)
 
     def _get_connection(self) -> sqlite3.Connection:
         """
@@ -94,7 +95,7 @@ class TwosDatabase:
     def _init_vector_search(self):
         """Initialize sqlite-vec extension for vector similarity search."""
         if not SQLITE_VEC_AVAILABLE:
-            print("⚠️  sqlite-vec not installed. Vector search unavailable.")
+            print("⚠️  sqlite-vec not installed. Vector search unavailable.", file=sys.stderr)
             self.embeddings_enabled = False
             return
 
@@ -116,7 +117,7 @@ class TwosDatabase:
             )
             conn.commit()
         except Exception as e:
-            print(f"⚠️  Vector search unavailable: {e}")
+            print(f"⚠️  Vector search unavailable: {e}", file=sys.stderr)
             self.embeddings_enabled = False
 
     def query_tasks_by_date(
@@ -724,7 +725,7 @@ class TwosDatabase:
             try:
                 semantic_results = self._vector_search(query, limit=limit * 2)
             except Exception as e:
-                print(f"⚠️  Semantic search failed, falling back to lexical: {e}")
+                print(f"⚠️  Semantic search failed, falling back to lexical: {e}", file=sys.stderr)
                 semantic_results = []
         else:
             semantic_results = []

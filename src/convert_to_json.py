@@ -12,6 +12,7 @@ This script parses the Twos "Markdown with timestamps" export format and extract
 import re
 import json
 import sys
+import hashlib
 from datetime import datetime
 from typing import Optional, List, Dict, Any, TypedDict
 from pathlib import Path
@@ -23,7 +24,7 @@ def parse_timestamp(timestamp_str: str) -> Optional[str]:
     Parse timestamp string to ISO format.
 
     Args:
-        timestamp_str: Timestamp like "10/27/23 9:14 pm"
+        timestamp_str: Timestamp like "10/27/23 9:14 pm" or "10/27/2023 9:14 pm"
 
     Returns:
         ISO format timestamp or None if parsing fails
@@ -31,10 +32,13 @@ def parse_timestamp(timestamp_str: str) -> Optional[str]:
     Edge cases:
         - Returns None if the string does not match expected formats.
         - Assumes month/day/year with a 12-hour clock and am/pm.
+        - Supports both 2-digit (23) and 4-digit (2023) years.
     """
     formats = [
         "%m/%d/%y %I:%M %p",
         "%m/%d/%y %I:%M%p",
+        "%m/%d/%Y %I:%M %p",   # 4-digit year support
+        "%m/%d/%Y %I:%M%p",    # 4-digit year without space before am/pm
     ]
 
     timestamp_str = timestamp_str.strip()
@@ -45,6 +49,36 @@ def parse_timestamp(timestamp_str: str) -> Optional[str]:
         except ValueError:
             continue
     return None
+
+
+def compute_stable_id(timestamp_iso: str, content: str, section_header: str) -> str:
+    """
+    Generate stable ID from content hash.
+
+    This ensures IDs remain stable across exports even when line numbers change.
+    Uses the same canonical fields as load_to_sqlite.py for consistency.
+
+    Args:
+        timestamp_iso: ISO format timestamp
+        content: Cleaned content text
+        section_header: Section header text
+
+    Returns:
+        12-character hex ID (e.g., "task_a3f9b2c1e5d4")
+    """
+    canonical = {
+        "timestamp": timestamp_iso,
+        "content": content.strip(),
+        "section_header": section_header.strip(),
+    }
+
+    # Sort keys for deterministic JSON
+    hash_input = json.dumps(canonical, sort_keys=True)
+    full_hash = hashlib.sha256(hash_input.encode()).hexdigest()
+
+    # Use first 12 chars for reasonable uniqueness (2^48 combinations)
+    # Prefix with "task_" for readability
+    return f"task_{full_hash[:12]}"
 
 
 def extract_links(text: str) -> List[Dict[str, str]]:
@@ -665,6 +699,11 @@ def parse_twos_file(file_path: Path, use_ner: bool = True) -> Dict[str, Any]:
                         # Clean content for storage and indexing.
                         content_clean = clean_content(line_stripped)
 
+                        # Generate stable ID from content hash (not sequential counter)
+                        stable_id = compute_stable_id(
+                            timestamp_iso, content_clean, current_section
+                        )
+
                         # Determine parent task based on indent depth.
                         parent_id = None
                         if indent_tabs > 0 and parent_stack:
@@ -676,7 +715,7 @@ def parse_twos_file(file_path: Path, use_ner: bool = True) -> Dict[str, Any]:
 
                         # Build task object with extracted metadata.
                         task = {
-                            "id": f"task_{task_id_counter:05d}",
+                            "id": stable_id,
                             "line_number": line_num,
                             "timestamp": timestamp_iso,
                             "timestamp_raw": timestamp_str,

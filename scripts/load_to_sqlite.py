@@ -66,6 +66,10 @@ def create_database(db_path: Path, schema_path: Path):
 
     # I/O boundary: create or overwrite the database file on disk.
     conn = sqlite3.connect(db_path)
+
+    # Enable foreign key constraints (required for proper CASCADE behavior)
+    conn.execute("PRAGMA foreign_keys = ON")
+
     conn.executescript(schema_sql)
     conn.commit()
 
@@ -1173,6 +1177,9 @@ def main():
     else:
         # Incremental mode (sync or append)
         conn = sqlite3.connect(args.output)
+
+        # Enable foreign key constraints (required for proper CASCADE behavior)
+        conn.execute("PRAGMA foreign_keys = ON")
 
         try:
             stats = incremental_load(

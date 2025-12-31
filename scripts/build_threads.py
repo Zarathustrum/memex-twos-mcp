@@ -239,7 +239,7 @@ def fetch_things_for_thread(
     cursor.row_factory = sqlite3.Row
 
     if kind == "tag":
-        # Fetch things with this tag
+        # Fetch things with this tag (tags.name is already lowercase)
         cursor.execute(
             """
             SELECT t.* FROM things t
@@ -251,13 +251,13 @@ def fetch_things_for_thread(
             (label,)
         )
     else:  # person
-        # Fetch things with this person
+        # Fetch things with this person (use normalized_name for case-insensitive match)
         cursor.execute(
             """
             SELECT t.* FROM things t
             JOIN thing_people tp ON t.id = tp.thing_id
             JOIN people p ON tp.person_id = p.id
-            WHERE p.name = ?
+            WHERE p.normalized_name = ?
             ORDER BY t.timestamp DESC
             """,
             (label,)

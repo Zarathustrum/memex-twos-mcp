@@ -31,4 +31,4 @@ dev = [
 ]
 
 [project.scripts]
-memex-twos-mcp = "memex_twos_mcp.server:main"
+memex-twos-mcp = "memex_twos_mcp.server:run"

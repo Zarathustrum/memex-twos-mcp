@@ -342,6 +342,19 @@ def apply_fixes(
     # Remove duplicates by filtering out marked IDs.
     cleaned_things = [t for t in things if t["id"] not in ids_to_remove]
 
+    # Fix 3: Re-check for newly orphaned children after duplicate removal.
+    # If a removed thing was a parent, its children are now orphaned.
+    existing_ids = {t["id"] for t in cleaned_things}
+    for thing in cleaned_things:
+        parent_id = thing.get("parent_task_id")
+        if parent_id and parent_id not in existing_ids:
+            # Parent was removed, null out the reference
+            old_parent = thing["parent_task_id"]
+            thing["parent_task_id"] = None
+            changes.add_modified(
+                thing["id"], "parent_task_id", old_parent, None, "parent_removed_during_grooming"
+            )
+
     return cleaned_things
 
 
