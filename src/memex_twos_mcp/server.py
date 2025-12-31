@@ -4,6 +4,18 @@ Memex Twos MCP Server
 
 Model Context Protocol server for querying and analyzing personal task data
 from Twos app exports stored in SQLite.
+
+I/O Boundary: JSON-RPC over stdin/stdout (MCP stdio protocol).
+
+Protocol safety:
+- MCP uses JSON-RPC framing over stdio (newline-delimited JSON messages).
+- Any output to stdout corrupts the protocol and breaks client communication.
+- All logging and warnings MUST go to stderr, never stdout.
+- This includes imports of database.py and other modules.
+
+External dependency:
+- mcp.server.stdio_server: Anthropic's MCP SDK for stdio transport.
+- Expects async main() for server lifecycle management.
 """
 
 import asyncio
@@ -1117,8 +1129,15 @@ def run():
     """
     Synchronous entry point for console script.
 
-    This wrapper allows the package to be installed as a console script
-    via pyproject.toml while maintaining an async main() implementation.
+    Why this wrapper is necessary:
+    - pyproject.toml defines console script: memex-twos-mcp = "memex_twos_mcp.server:run"
+    - setuptools' console_scripts entrypoint expects a regular function, not async.
+    - Calling an async function directly results in "coroutine never awaited" error.
+    - This sync wrapper uses asyncio.run() to execute the async main() properly.
+
+    Without this wrapper:
+    - Users running `memex-twos-mcp` from command line would get runtime errors.
+    - The server would never start, appearing completely broken after `pip install`.
     """
     asyncio.run(main())
 

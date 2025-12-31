@@ -1,6 +1,21 @@
 """
 Database wrapper for Twos SQLite database.
 Provides safe query methods for MCP tools.
+
+Concurrency model:
+- Single persistent SQLite connection per TwosDatabase instance (connection pooling).
+- Thread-safe via threading.Lock() around connection access.
+- check_same_thread=False allows multi-threaded access (required for async MCP server).
+- Queries are NOT concurrent (lock serializes them), but connection overhead is eliminated.
+
+Protocol safety:
+- All print() statements use file=sys.stderr to avoid corrupting MCP stdio protocol.
+- MCP uses JSON-RPC over stdout; any stdout output breaks client communication.
+- This applies to errors, warnings, and debug output.
+
+External dependencies:
+- sqlite_vec (optional): Vector similarity search for semantic queries.
+- sentence-transformers (optional): Embedding generation for hybrid search.
 """
 
 import sqlite3
@@ -62,8 +77,16 @@ class TwosDatabase:
         """
         Get a persistent database connection with row factory (connection pooling).
 
-        Returns a single shared connection instead of creating new connections per query.
-        Thread-safe via locking.
+        Thread safety:
+        - Lock acquisition ensures only one thread accesses connection at a time.
+        - check_same_thread=False required because MCP server is async (may use threads).
+        - Without lock, concurrent queries would corrupt SQLite state (not thread-safe).
+        - With lock, queries are serialized (no parallelism, but safe).
+
+        Performance trade-off:
+        - Connection pooling eliminates per-query open/close overhead (~100ms savings).
+        - Serialization via lock means concurrent requests block each other.
+        - For read-heavy workloads, this is acceptable (SQLite locks anyway).
 
         Returns:
             A sqlite3.Connection that yields rows as dict-like objects.

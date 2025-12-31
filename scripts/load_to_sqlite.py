@@ -2,6 +2,23 @@
 """
 Load converted Twos JSON data into SQLite database.
 
+I/O Boundary: Reads JSON from disk, writes to SQLite database file.
+
+This script operates in three modes:
+1. rebuild (default): Delete all data, full reload (use for first import)
+2. append: Insert new items only (use for daily updates, safest)
+3. sync: Insert new, update changed, delete removed (use when export is authoritative)
+
+Mode selection:
+- Rebuild: Always safe, but slow for large datasets
+- Append: Fast incremental, but won't detect changes/deletions
+- Sync: Full incremental, requires stable IDs from convert_to_json.py
+
+Incremental mode relies on:
+- Stable content-hash based IDs (not sequential counters)
+- Matching hash computation in convert_to_json.py
+- Foreign key constraints enabled for CASCADE deletions
+
 This script:
 - Creates the database schema
 - Loads all things
@@ -51,6 +68,14 @@ def create_database(db_path: Path, schema_path: Path):
     """
     Create database and apply schema.
 
+    Irreversible action: Overwrites existing database file at db_path.
+
+    Foreign key enforcement:
+    - SQLite disables foreign keys by default for backwards compatibility.
+    - Without "PRAGMA foreign_keys = ON", CASCADE deletions don't work.
+    - This would leave orphaned rows in junction tables (thing_tags, thing_people, etc).
+    - Must be set per-connection, not per-database.
+
     Args:
         db_path: Path where the SQLite file will be created.
         schema_path: Path to a SQL schema file.
@@ -68,6 +93,7 @@ def create_database(db_path: Path, schema_path: Path):
     conn = sqlite3.connect(db_path)
 
     # Enable foreign key constraints (required for proper CASCADE behavior)
+    # Must be set before schema creation for best compatibility
     conn.execute("PRAGMA foreign_keys = ON")
 
     conn.executescript(schema_sql)
@@ -1179,6 +1205,9 @@ def main():
         conn = sqlite3.connect(args.output)
 
         # Enable foreign key constraints (required for proper CASCADE behavior)
+        # Critical in sync mode: when things are deleted, CASCADE ensures
+        # junction table rows (thing_tags, thing_people, etc) are also deleted.
+        # Without this, orphaned rows accumulate silently.
         conn.execute("PRAGMA foreign_keys = ON")
 
         try:

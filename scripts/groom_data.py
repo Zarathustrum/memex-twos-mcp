@@ -293,7 +293,19 @@ def apply_fixes(
     changes: GroomingChanges,
 ) -> List[Dict[str, Any]]:
     """
-    Apply automatic fixes to the data.
+    Apply automatic fixes to the data in three passes.
+
+    Fix strategy:
+    1. Remove exact duplicates (same content + timestamp within 1 min)
+    2. Null orphaned parent references (parent_task_id points to non-existent item)
+    3. Re-check for NEW orphans created by duplicate removal
+
+    Why Fix 3 is necessary:
+    - Fix 1 removes duplicate items from the dataset
+    - If a removed item was someone's parent, that child becomes orphaned
+    - Fix 2 only catches orphans in the ORIGINAL dataset
+    - Fix 3 catches orphans CREATED by the grooming process itself
+    - Without Fix 3, we'd create new data integrity issues while fixing old ones
 
     Returns:
         A new list of cleaned things, leaving the input list unchanged.

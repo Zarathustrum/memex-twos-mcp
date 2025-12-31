@@ -251,7 +251,11 @@ def fetch_things_for_thread(
             (label,)
         )
     else:  # person
-        # Fetch things with this person (use normalized_name for case-insensitive match)
+        # Fetch things with this person
+        # IMPORTANT: Use normalized_name (lowercase), not name (original case).
+        # build_thread() passes label_norm (lowercase) as the label parameter.
+        # people.name stores original case ("Alice"), but normalized_name is lowercase ("alice").
+        # Querying by p.name would return zero results due to case mismatch.
         cursor.execute(
             """
             SELECT t.* FROM things t
