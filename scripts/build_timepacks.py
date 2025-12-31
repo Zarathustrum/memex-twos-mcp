@@ -5,6 +5,25 @@ TimePacks Builder
 Builds day/week/month rollups stored in the database for fast
 "what happened last week/month?" queries.
 
+I/O Boundary: Reads from SQLite database, writes rollups back to database.
+
+Purpose:
+- Precompute time-based rollups to avoid querying 300+ items per MCP request
+- Token optimization: ~800 char pack vs ~10K+ chars of raw things
+- Query speed: 1 SELECT vs scanning entire things table
+- Enables fast "what happened last week/month?" queries
+
+Pack format design:
+- Pipe-delimited for parsability (~800 chars max to fit MCP context)
+- Top 8 tags/people (most relevant, fits token budget)
+- Top 20 keywords (stopword filtered)
+- Top 10 highlights (scored by recency + entity density + length + status)
+
+Incremental rebuild:
+- Uses src_hash (SHA256 of thing IDs + content hashes)
+- Skips rebuild if source data unchanged
+- Force flag available to override
+
 TP1 Pack Format:
 TP1|k=<d|w|m>|s=<start_date>|e=<end_date>|n=<total>|cx=<completed>|pn=<pending>|st=<strikethrough>|tg=<tag:count,...>|pp=<person:count,...>|kw=<word,word,...>|hi=<thing_id~label;...>
 """

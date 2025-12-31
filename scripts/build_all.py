@@ -75,10 +75,28 @@ def build_derived_indices(
     """
     Build derived indices (rollups, threads, summaries).
 
+    Orchestration strategy:
+    - Runs builders in dependency order (timepacks → threads, summaries)
+    - Partial success allowed: if TimePacks fails, ThreadPacks still runs
+    - Dependency blocking: if TimePacks fails, MonthlySummaries is skipped
+    - Each builder runs independently (isolated error handling)
+    - Returns detailed status for each builder (success/failed + stats/errors)
+
+    Error handling:
+    - Builder failure doesn't stop execution (partial success)
+    - Errors captured per-builder and returned in result dict
+    - Exit code 0 only if ALL requested builders succeeded
+    - Exit code 1 if any builder failed (even if others succeeded)
+
+    Dependency chain:
+    - TimePacks: no dependencies (runs first)
+    - ThreadPacks: no dependencies (runs after TimePacks for simplicity)
+    - MonthlySummaries: depends on TimePacks (skipped if TimePacks failed)
+
     Args:
         db_path: Path to SQLite database
-        with_llm: Include LLM-powered monthly summaries
-        force: Force rebuild (ignore incremental)
+        with_llm: Include LLM-powered monthly summaries (uses API quota)
+        force: Force rebuild (ignore incremental src_hash check)
         builders: Optional list of builders to run (default: timepacks + threads)
         verbose: Print progress to stdout
 

@@ -5,6 +5,21 @@ MonthlySummaries Builder
 Generates LLM-powered semantic summaries for monthly data exploration.
 Uses Claude Code CLI for semantic analysis.
 
+I/O Boundary: Reads from SQLite database, writes summaries back to database.
+External API: Invokes Claude Code CLI via subprocess (uses user's API quota).
+
+Purpose:
+- TimePacks provide mechanical facts ("what happened")
+- MonthlySummaries provide semantic framing ("so what")
+- Enables "system prompt lite" context for monthly exploration
+- All insights anchored to specific thing IDs (no hallucinations)
+
+Billing/Quota:
+- Each month summary consumes ~2K-5K tokens (input + output)
+- Building 12 months = ~24K-60K tokens (~$0.06-$0.15 at Sonnet rates)
+- Uses user's Claude API quota via Claude Code CLI
+- Rate limits may apply (handled by Claude Code CLI)
+
 MS1 Pack Format:
 MS1|m=<YYYY-MM>|n=<total>|tg=<tag:count,...>|pp=<person:count,...>|th=<theme@thing_id,...;...>|hi=<thing_id~label;...>|nq=<question_count>
 """
@@ -36,15 +51,37 @@ def invoke_llm_via_claude_code(prompt: str, timeout: int = 120) -> Dict[str, Any
     """
     Invoke Claude Code CLI for semantic analysis.
 
+    External dependency: Requires `claude-code` CLI installed and authenticated.
+    Billing: Consumes user's Claude API quota (~2K-5K tokens per call).
+
+    Security considerations:
+    - subprocess.run() with shell=True (via bash -c) for pipe compatibility
+    - Temp file used to avoid command-line injection (prompt could contain shell metacharacters)
+    - Timeout enforced to prevent indefinite hangs (default 120s)
+    - Temp file always cleaned up even on error (finally block)
+
+    Failure modes:
+    - Claude Code CLI not installed → RuntimeError
+    - API rate limit hit → RuntimeError (retry manually)
+    - Timeout exceeded → subprocess.TimeoutExpired → RuntimeError
+    - Invalid JSON in response → json.JSONDecodeError → RuntimeError
+    - Network failure → RuntimeError
+
+    Response parsing:
+    - Claude Code returns markdown with JSON code blocks
+    - Extracts JSON from ```json...``` blocks or raw JSON
+    - Lenient parsing (tries multiple strategies)
+
     Args:
-        prompt: Analysis prompt
-        timeout: Timeout in seconds
+        prompt: Analysis prompt (can be large, ~1K-2K chars)
+        timeout: Timeout in seconds (default 120s for API calls)
 
     Returns:
         Parsed JSON response from LLM
 
     Raises:
-        RuntimeError: If LLM invocation fails
+        RuntimeError: If LLM invocation fails (any reason)
+        subprocess.TimeoutExpired: If timeout exceeded
     """
     # Write prompt to temp file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:

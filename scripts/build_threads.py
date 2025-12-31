@@ -4,6 +4,24 @@ ThreadPacks Builder
 
 Builds tag and person thread indices for fast "what's active?" queries.
 
+I/O Boundary: Reads from SQLite database, writes thread indices back to database.
+
+Purpose:
+- Precompute activity indices for tags and people (deterministic, no embeddings)
+- Answers "What's active with Alice?" or "Show me recent #work threads"
+- Token optimization: compact thread pack vs full query results
+- Activity detection: 90-day active window (configurable)
+
+Thread types:
+- Single-tag threads: thr:tag:work, thr:tag:personal, etc.
+- Single-person threads: thr:person:alice, thr:person:bob, etc.
+- Multi-tag intersection computed at query time (not precomputed)
+
+Incremental rebuild:
+- Uses src_hash (SHA256 of thing IDs + content hashes)
+- Skips rebuild if source data unchanged for this thread
+- Force flag available to override
+
 TH1 Pack Format:
 TH1|id=<thread_id>|st=<active|stale>|last=<last_ts>|n=<total>|a90=<count_90d>|kw=<word,word,...>|hi=<thing_id~label;...>
 """
