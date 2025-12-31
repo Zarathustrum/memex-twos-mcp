@@ -29,16 +29,26 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+# Import shared LLM utilities
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from llm_utils import check_claude_cli_installed
+except ImportError as e:
+    print(f"ERROR: Could not import llm_utils: {e}", file=sys.stderr)
+    sys.exit(1)
+
 
 def check_claude_code() -> bool:
     """
     Check if Claude Code CLI is installed.
 
+    NOTE: This is a compatibility wrapper. New code should use
+    llm_utils.check_claude_cli_installed() directly.
+
     Returns:
         True if the `claude` executable is on PATH.
     """
-    result = subprocess.run(["which", "claude"], capture_output=True, text=True)
-    return result.returncode == 0
+    return check_claude_cli_installed()
 
 
 def load_json_data(json_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:

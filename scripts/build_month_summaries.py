@@ -42,35 +42,21 @@ from typing import Any, Dict, List, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).parent))
 try:
     from build_timepacks import compute_src_hash, score_highlight, make_label
-except ImportError:
-    print("ERROR: Could not import from build_timepacks.py", file=sys.stderr)
+    from llm_utils import invoke_llm
+except ImportError as e:
+    print(f"ERROR: Could not import required modules: {e}", file=sys.stderr)
     sys.exit(1)
 
 
 def invoke_llm_via_claude_code(prompt: str, timeout: int = 120) -> Dict[str, Any]:
     """
-    Invoke Claude Code CLI for semantic analysis.
+    Invoke LLM for semantic analysis via unified backend.
 
-    External dependency: Requires `claude-code` CLI installed and authenticated.
-    Billing: Consumes user's Claude API quota (~2K-5K tokens per call).
+    NOTE: This function is a compatibility wrapper. New code should use
+    llm_utils.invoke_llm() directly.
 
-    Security considerations:
-    - subprocess.run() with shell=True (via bash -c) for pipe compatibility
-    - Temp file used to avoid command-line injection (prompt could contain shell metacharacters)
-    - Timeout enforced to prevent indefinite hangs (default 120s)
-    - Temp file always cleaned up even on error (finally block)
-
-    Failure modes:
-    - Claude Code CLI not installed → RuntimeError
-    - API rate limit hit → RuntimeError (retry manually)
-    - Timeout exceeded → subprocess.TimeoutExpired → RuntimeError
-    - Invalid JSON in response → json.JSONDecodeError → RuntimeError
-    - Network failure → RuntimeError
-
-    Response parsing:
-    - Claude Code returns markdown with JSON code blocks
-    - Extracts JSON from ```json...``` blocks or raw JSON
-    - Lenient parsing (tries multiple strategies)
+    External dependency: Requires LLM backend (Claude CLI or Anthropic API).
+    Billing: Consumes user's Claude subscription quota (~2K-5K tokens per call).
 
     Args:
         prompt: Analysis prompt (can be large, ~1K-2K chars)
@@ -82,48 +68,9 @@ def invoke_llm_via_claude_code(prompt: str, timeout: int = 120) -> Dict[str, Any
     Raises:
         RuntimeError: If LLM invocation fails (any reason)
         subprocess.TimeoutExpired: If timeout exceeded
+        ValueError: If JSON parsing fails
     """
-    # Write prompt to temp file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-        prompt_file = Path(f.name)
-        f.write(prompt)
-
-    try:
-        # Invoke claude-code with prompt file
-        # Use echo to pipe the prompt as the user would in interactive mode
-        result = subprocess.run(
-            ["bash", "-c", f"cat {prompt_file} | claude-code --model sonnet"],
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(f"Claude Code invocation failed: {result.stderr}")
-
-        # Parse JSON from response (should be in stdout)
-        # Claude Code typically returns markdown with JSON code blocks
-        output = result.stdout
-
-        # Extract JSON from markdown code block if present
-        json_match = re.search(r'```json\s*(\{.*?\})\s*```', output, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            # Try to find raw JSON
-            json_match = re.search(r'\{.*\}', output, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
-            else:
-                raise RuntimeError(f"No JSON found in Claude Code response: {output[:500]}")
-
-        response = json.loads(json_str)
-        return response
-
-    finally:
-        # Cleanup temp file
-        if prompt_file.exists():
-            prompt_file.unlink()
+    return invoke_llm(prompt, response_format="json", timeout=timeout)
 
 
 def fetch_things_in_month(
