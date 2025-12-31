@@ -211,6 +211,8 @@ def test_validate_llm_response_invalid_thing_id():
     response = {
         "themes": [
             {"name": "work", "thing_ids": ["task_001", "task_999"]},  # Invalid ID
+            {"name": "health", "thing_ids": ["task_001"]},
+            {"name": "planning", "thing_ids": ["task_002"]},
         ],
         "highlights": [{"thing_id": "task_001", "label": "test"}] * 10,
         "questions": [{"text": "Test?", "anchors": ["task_001"], "rationale": "Test"}]
@@ -233,6 +235,8 @@ def test_validate_llm_response_invalid_theme_name():
                 "name": "Work Planning!",
                 "thing_ids": ["task_001", "task_002"],
             },  # Invalid chars
+            {"name": "health", "thing_ids": ["task_001"]},
+            {"name": "planning", "thing_ids": ["task_002"]},
         ],
         "highlights": [{"thing_id": "task_001", "label": "test"}] * 10,
         "questions": [{"text": "Test?", "anchors": ["task_001"], "rationale": "Test"}]
@@ -370,7 +374,7 @@ def test_build_llm_prompt_format():
     assert "Top people: alice:7" in prompt
     assert "task_001" in prompt
     assert "Candidate highlights" in prompt
-    assert "CRITICAL" in prompt  # Warning about hallucination
+    assert "ABSOLUTE RULES" in prompt  # Warning about hallucination
 
 
 def test_generate_month_windows():

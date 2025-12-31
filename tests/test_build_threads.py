@@ -83,7 +83,8 @@ def temp_db():
         """
         CREATE TABLE people (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL
+            name TEXT UNIQUE NOT NULL,
+            normalized_name TEXT
         )
     """
     )
@@ -397,7 +398,9 @@ def test_build_function(temp_db):
 
     # Insert tags and people
     cursor.execute("INSERT INTO tags (name) VALUES ('work'), ('health')")
-    cursor.execute("INSERT INTO people (name) VALUES ('Alice'), ('Bob')")
+    cursor.execute(
+        "INSERT INTO people (name, normalized_name) VALUES ('Alice', 'alice'), ('Bob', 'bob')"
+    )
 
     # Insert things
     now = datetime.now()
