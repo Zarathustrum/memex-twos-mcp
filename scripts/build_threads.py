@@ -45,27 +45,144 @@ try:
 except ImportError:
     # Fallback implementation
     def make_label(content: str, max_len: int = 32) -> str:
-        words = re.findall(r'\b[a-zA-Z0-9]+\b', content)[:4]
+        words = re.findall(r"\b[a-zA-Z0-9]+\b", content)[:4]
         label = "_".join(words).lower()
         if len(label) > max_len:
             label = label[:max_len]
         return label if label else "item"
 
+
 # Common English stopwords for keyword extraction
 STOPWORDS = {
-    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and",
-    "any", "are", "as", "at", "be", "because", "been", "before", "being", "below",
-    "between", "both", "but", "by", "can", "did", "do", "does", "doing", "don",
-    "down", "during", "each", "few", "for", "from", "further", "had", "has", "have",
-    "having", "he", "her", "here", "hers", "herself", "him", "himself", "his", "how",
-    "i", "if", "in", "into", "is", "it", "its", "itself", "just", "me", "might",
-    "more", "most", "my", "myself", "no", "nor", "not", "now", "of", "off", "on",
-    "once", "only", "or", "other", "our", "ours", "ourselves", "out", "over", "own",
-    "s", "same", "she", "should", "so", "some", "such", "t", "than", "that", "the",
-    "their", "theirs", "them", "themselves", "then", "there", "these", "they", "this",
-    "those", "through", "to", "too", "under", "until", "up", "very", "was", "we",
-    "were", "what", "when", "where", "which", "while", "who", "whom", "why", "will",
-    "with", "would", "you", "your", "yours", "yourself", "yourselves"
+    "a",
+    "about",
+    "above",
+    "after",
+    "again",
+    "against",
+    "all",
+    "am",
+    "an",
+    "and",
+    "any",
+    "are",
+    "as",
+    "at",
+    "be",
+    "because",
+    "been",
+    "before",
+    "being",
+    "below",
+    "between",
+    "both",
+    "but",
+    "by",
+    "can",
+    "did",
+    "do",
+    "does",
+    "doing",
+    "don",
+    "down",
+    "during",
+    "each",
+    "few",
+    "for",
+    "from",
+    "further",
+    "had",
+    "has",
+    "have",
+    "having",
+    "he",
+    "her",
+    "here",
+    "hers",
+    "herself",
+    "him",
+    "himself",
+    "his",
+    "how",
+    "i",
+    "if",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "itself",
+    "just",
+    "me",
+    "might",
+    "more",
+    "most",
+    "my",
+    "myself",
+    "no",
+    "nor",
+    "not",
+    "now",
+    "of",
+    "off",
+    "on",
+    "once",
+    "only",
+    "or",
+    "other",
+    "our",
+    "ours",
+    "ourselves",
+    "out",
+    "over",
+    "own",
+    "s",
+    "same",
+    "she",
+    "should",
+    "so",
+    "some",
+    "such",
+    "t",
+    "than",
+    "that",
+    "the",
+    "their",
+    "theirs",
+    "them",
+    "themselves",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "through",
+    "to",
+    "too",
+    "under",
+    "until",
+    "up",
+    "very",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "who",
+    "whom",
+    "why",
+    "will",
+    "with",
+    "would",
+    "you",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves",
 }
 
 
@@ -91,9 +208,7 @@ def compute_src_hash(things: List[Dict[str, Any]]) -> str:
 
 
 def score_thread_highlight(
-    thing: Dict[str, Any],
-    now: datetime,
-    active_days: int = 90
+    thing: Dict[str, Any], now: datetime, active_days: int = 90
 ) -> float:
     """
     Deterministic highlight scoring for thread highlights.
@@ -134,9 +249,7 @@ def score_thread_highlight(
 
     # Weighted combination
     score = (
-        recency_score * 0.50 +
-        entity_density_score * 0.30 +
-        content_length_score * 0.20
+        recency_score * 0.50 + entity_density_score * 0.30 + content_length_score * 0.20
     )
 
     return score
@@ -159,7 +272,7 @@ def extract_keywords(things: List[Dict[str, Any]], top_n: int = 20) -> List[str]
     for thing in things:
         content = thing.get("content", "").lower()
         # Extract words (alphanumeric sequences)
-        tokens = re.findall(r'\b[a-z]+\b', content)
+        tokens = re.findall(r"\b[a-z]+\b", content)
 
         for token in tokens:
             # Skip stopwords, single chars, numbers
@@ -180,7 +293,7 @@ def build_th1_pack(
     thing_count: int,
     thing_count_90d: int,
     keywords: List[str],
-    highlights: List[Dict[str, Any]]
+    highlights: List[Dict[str, Any]],
 ) -> str:
     """
     Build TH1 format pack string.
@@ -238,9 +351,7 @@ def build_th1_pack(
 
 
 def fetch_things_for_thread(
-    conn: sqlite3.Connection,
-    kind: str,
-    label: str
+    conn: sqlite3.Connection, kind: str, label: str
 ) -> List[Dict[str, Any]]:
     """
     Fetch all things associated with a tag or person thread.
@@ -266,7 +377,7 @@ def fetch_things_for_thread(
             WHERE tg.name = ?
             ORDER BY t.timestamp DESC
             """,
-            (label,)
+            (label,),
         )
     else:  # person
         # Fetch things with this person
@@ -282,7 +393,7 @@ def fetch_things_for_thread(
             WHERE p.normalized_name = ?
             ORDER BY t.timestamp DESC
             """,
-            (label,)
+            (label,),
         )
 
     things = []
@@ -297,7 +408,7 @@ def fetch_things_for_thread(
             JOIN thing_tags tt ON t.id = tt.tag_id
             WHERE tt.thing_id = ?
             """,
-            (thing_id,)
+            (thing_id,),
         )
         thing["tags"] = [r[0] for r in cursor.fetchall()]
 
@@ -308,7 +419,7 @@ def fetch_things_for_thread(
             JOIN thing_people tp ON p.id = tp.person_id
             WHERE tp.thing_id = ?
             """,
-            (thing_id,)
+            (thing_id,),
         )
         thing["people_mentioned"] = [r[0] for r in cursor.fetchall()]
 
@@ -324,7 +435,7 @@ def build_thread(
     label_norm: str,
     active_days: int = 90,
     force: bool = False,
-    builder_v: str = "1.0"
+    builder_v: str = "1.0",
 ) -> Tuple[bool, Optional[str]]:
     """
     Build a single thread index.
@@ -356,10 +467,7 @@ def build_thread(
     src_hash = compute_src_hash(things)
 
     # Check existing thread
-    cursor.execute(
-        "SELECT src_hash FROM threads WHERE thread_id = ?",
-        (thread_id,)
-    )
+    cursor.execute("SELECT src_hash FROM threads WHERE thread_id = ?", (thread_id,))
     row = cursor.fetchone()
 
     if row and row[0] == src_hash and not force:
@@ -371,10 +479,7 @@ def build_thread(
     cutoff = now - timedelta(days=active_days)
     cutoff_str = cutoff.isoformat()
 
-    recent_things = [
-        t for t in things
-        if t.get("timestamp", "") >= cutoff_str
-    ]
+    recent_things = [t for t in things if t.get("timestamp", "") >= cutoff_str]
 
     thing_count = len(things)
     thing_count_90d = len(recent_things)
@@ -422,7 +527,7 @@ def build_thread(
         thing_count,
         thing_count_90d,
         keywords,
-        highlights
+        highlights,
     )
 
     # Delete old thread + evidence
@@ -441,11 +546,22 @@ def build_thread(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            thread_id, kind, label, label_norm,
-            start_ts, last_ts, thing_count, thing_count_90d,
-            status, None,
-            1, pack, kw_text, src_hash, builder_v
-        )
+            thread_id,
+            kind,
+            label,
+            label_norm,
+            start_ts,
+            last_ts,
+            thing_count,
+            thing_count_90d,
+            status,
+            None,
+            1,
+            pack,
+            kw_text,
+            src_hash,
+            builder_v,
+        ),
     )
 
     # Insert highlights
@@ -455,7 +571,7 @@ def build_thread(
             INSERT INTO thread_evidence (thread_id, thing_id, role, rank)
             VALUES (?, ?, 'hi', ?)
             """,
-            (thread_id, thing["id"], rank)
+            (thread_id, thing["id"], rank),
         )
 
     # Insert evidence
@@ -465,7 +581,7 @@ def build_thread(
             INSERT INTO thread_evidence (thread_id, thing_id, role, rank)
             VALUES (?, ?, 'ev', ?)
             """,
-            (thread_id, thing["id"], rank)
+            (thread_id, thing["id"], rank),
         )
 
     # Insert into FTS
@@ -474,17 +590,14 @@ def build_thread(
         INSERT INTO threads_fts (thread_id, label, kw)
         VALUES (?, ?, ?)
         """,
-        (thread_id, label, kw_text)
+        (thread_id, label, kw_text),
     )
 
     return True, None
 
 
 def build(
-    db_path: Path,
-    force: bool = False,
-    active_days: int = 90,
-    kinds: str = "tag,person"
+    db_path: Path, force: bool = False, active_days: int = 90, kinds: str = "tag,person"
 ) -> Dict[str, Any]:
     """
     Build thread indices for tags and people.
@@ -530,7 +643,7 @@ def build(
             "stale_count": 0,
             "new_count": 0,
             "updated_count": 0,
-            "skipped_count": 0
+            "skipped_count": 0,
         }
 
         # Build tag threads
@@ -540,8 +653,7 @@ def build(
 
             for tag_name in tags:
                 was_built, error = build_thread(
-                    conn, "tag", tag_name, tag_name.lower(),
-                    active_days, force
+                    conn, "tag", tag_name, tag_name.lower(), active_days, force
                 )
 
                 if was_built:
@@ -561,8 +673,7 @@ def build(
 
             for person_name in people:
                 was_built, error = build_thread(
-                    conn, "person", person_name, person_name.lower(),
-                    active_days, force
+                    conn, "person", person_name, person_name.lower(), active_days, force
                 )
 
                 if was_built:
@@ -593,7 +704,7 @@ def build(
             "success": True,
             "stats": stats,
             "duration_seconds": round(duration, 2),
-            "error": None
+            "error": None,
         }
 
     except Exception as e:
@@ -601,7 +712,7 @@ def build(
             "success": False,
             "error": str(e),
             "stats": {},
-            "duration_seconds": time.time() - start_time
+            "duration_seconds": time.time() - start_time,
         }
 
 
@@ -614,24 +725,22 @@ def main():
         "--db",
         type=Path,
         default=Path("data/processed/twos.db"),
-        help="Path to SQLite database (default: data/processed/twos.db)"
+        help="Path to SQLite database (default: data/processed/twos.db)",
     )
     parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force rebuild (ignore src_hash)"
+        "--force", action="store_true", help="Force rebuild (ignore src_hash)"
     )
     parser.add_argument(
         "--active-days",
         type=int,
         default=90,
-        help="Active window in days (default: 90)"
+        help="Active window in days (default: 90)",
     )
     parser.add_argument(
         "--kinds",
         type=str,
         default="tag,person",
-        help="Comma-separated kinds to build (default: tag,person)"
+        help="Comma-separated kinds to build (default: tag,person)",
     )
 
     args = parser.parse_args()
@@ -650,7 +759,7 @@ def main():
         db_path=args.db,
         force=args.force,
         active_days=args.active_days,
-        kinds=args.kinds
+        kinds=args.kinds,
     )
 
     if result["success"]:

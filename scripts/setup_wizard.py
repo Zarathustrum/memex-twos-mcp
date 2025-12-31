@@ -24,7 +24,6 @@ try:
     from rich.rule import Rule
     from rich.table import Table
     from rich.text import Text
-    from rich.progress import Progress, SpinnerColumn, TextColumn
 
     RICH_AVAILABLE = True
 except ImportError:
@@ -153,7 +152,9 @@ class ConsoleRenderer:
             table.add_column("Value", style="white")
 
             # Configuration
-            table.add_row("Mode", "Non-interactive" if config.non_interactive else "Interactive")
+            table.add_row(
+                "Mode", "Non-interactive" if config.non_interactive else "Interactive"
+            )
             table.add_row("Data source", config.data_mode.title())
             table.add_row("Export file", config.export_file or "N/A")
 
@@ -167,7 +168,8 @@ class ConsoleRenderer:
             table.add_row("Grooming", "Yes" if config.run_grooming else "No")
             table.add_row("AI analysis", "Yes" if config.run_ai_analysis else "No")
             table.add_row(
-                "Entity classification", "Yes" if config.run_entity_classification else "No"
+                "Entity classification",
+                "Yes" if config.run_entity_classification else "No",
             )
             table.add_row("MCP config", "Yes" if config.generate_mcp_config else "No")
 
@@ -207,7 +209,14 @@ class ConsoleRenderer:
                     )
 
             self.console.print()
-            self.console.print(Panel(table, title="[bold white]Setup Summary[/bold white]", border_style="green", padding=(1, 2)))
+            self.console.print(
+                Panel(
+                    table,
+                    title="[bold white]Setup Summary[/bold white]",
+                    border_style="green",
+                    padding=(1, 2),
+                )
+            )
             self.console.print()
 
         else:
@@ -215,7 +224,9 @@ class ConsoleRenderer:
             print("\n" + "=" * 70)
             print("  SETUP SUMMARY")
             print("=" * 70)
-            print(f"  Mode: {'Non-interactive' if config.non_interactive else 'Interactive'}")
+            print(
+                f"  Mode: {'Non-interactive' if config.non_interactive else 'Interactive'}"
+            )
             print(f"  Data source: {config.data_mode.title()}")
             print(f"  Export file: {config.export_file or 'N/A'}")
             print()
@@ -224,7 +235,9 @@ class ConsoleRenderer:
             print()
             print(f"  Grooming: {'Yes' if config.run_grooming else 'No'}")
             print(f"  AI analysis: {'Yes' if config.run_ai_analysis else 'No'}")
-            print(f"  Entity classification: {'Yes' if config.run_entity_classification else 'No'}")
+            print(
+                f"  Entity classification: {'Yes' if config.run_entity_classification else 'No'}"
+            )
             print(f"  MCP config: {'Yes' if config.generate_mcp_config else 'No'}")
             print()
             print(f"  Total elapsed: {elapsed:.1f}s")
@@ -318,9 +331,7 @@ def collect_configuration(
         )
 
     # Dependencies
-    config.install_deps = prompt_yes_no(
-        renderer, "Install dependencies?", default=True
-    )
+    config.install_deps = prompt_yes_no(renderer, "Install dependencies?", default=True)
 
     # Data setup
     if not args.export_file:
@@ -400,7 +411,9 @@ def collect_configuration(
     if config.data_mode != "skip":
         print(f"  Grooming: {'Yes' if config.run_grooming else 'No'}")
         print(f"  AI analysis: {'Yes' if config.run_ai_analysis else 'No'}")
-        print(f"  Entity classification: {'Yes' if config.run_entity_classification else 'No'}")
+        print(
+            f"  Entity classification: {'Yes' if config.run_entity_classification else 'No'}"
+        )
         print(f"  Derived indices: {'Yes' if config.build_derived_indices else 'No'}")
         if config.build_derived_indices:
             print(f"  With LLM summaries: {'Yes' if config.build_with_llm else 'No'}")
@@ -420,14 +433,14 @@ def collect_configuration(
 # ============================================================================
 
 
-def stage_check_python(
-    renderer: ConsoleRenderer, config: WizardConfig
-) -> StageResult:
+def stage_check_python(renderer: ConsoleRenderer, config: WizardConfig) -> StageResult:
     """Check Python version."""
     renderer.banner(2, "ENVIRONMENT CHECK")
     start = time.time()
 
-    py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    py_version = (
+        f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    )
 
     if sys.version_info < (3, 10):
         renderer.status("FAIL", f"Python 3.10+ required, you have {py_version}")
@@ -471,9 +484,7 @@ def stage_setup_venv(renderer: ConsoleRenderer, config: WizardConfig) -> StageRe
         return StageResult(success=False, duration=time.time() - start)
 
 
-def stage_install_deps(
-    renderer: ConsoleRenderer, config: WizardConfig
-) -> StageResult:
+def stage_install_deps(renderer: ConsoleRenderer, config: WizardConfig) -> StageResult:
     """Install Python dependencies."""
     renderer.banner(4, "DEPENDENCIES")
     start = time.time()
@@ -535,7 +546,9 @@ def stage_data_setup(renderer: ConsoleRenderer, config: WizardConfig) -> StageRe
                 return StageResult(success=False, duration=time.time() - start)
 
             shutil.copy(sample_path, "data/raw/twos_export.md")
-            renderer.status("OK", "Sample data copied", detail="data/raw/twos_export.md")
+            renderer.status(
+                "OK", "Sample data copied", detail="data/raw/twos_export.md"
+            )
 
         return StageResult(success=True, duration=time.time() - start)
 
@@ -653,9 +666,7 @@ def stage_entity_classification(
         return StageResult(success=True, duration=time.time() - start)
 
     try:
-        with renderer.spinner(
-            "Classifying entities (may take 2-3 minutes)"
-        ):
+        with renderer.spinner("Classifying entities (may take 2-3 minutes)"):
             result = subprocess.run(
                 [
                     sys.executable,
@@ -742,7 +753,9 @@ def stage_embeddings(renderer: ConsoleRenderer, config: WizardConfig) -> StageRe
     return StageResult(success=True, duration=time.time() - start)
 
 
-def stage_derived_indices(renderer: ConsoleRenderer, config: WizardConfig) -> StageResult:
+def stage_derived_indices(
+    renderer: ConsoleRenderer, config: WizardConfig
+) -> StageResult:
     """Build derived indices (rollups, threads, optional LLM summaries)."""
     renderer.banner(11, "DERIVED INDICES (OPTIONAL)")
     start = time.time()
@@ -874,9 +887,7 @@ def stage_validation(renderer: ConsoleRenderer, config: WizardConfig) -> StageRe
         if config.verbose:
             print(output)
 
-        return StageResult(
-            success=True, duration=time.time() - start, metrics=metrics
-        )
+        return StageResult(success=True, duration=time.time() - start, metrics=metrics)
 
     except subprocess.CalledProcessError as e:
         renderer.status("WARN", "Validation failed (non-critical)", detail=str(e))
@@ -1021,7 +1032,9 @@ def prompt_stage_selection(renderer: ConsoleRenderer, stages: list) -> int:
             if 1 <= stage_num <= len(stages):
                 return stage_num - 1  # Convert to 0-based index
             else:
-                print(f"Invalid choice. Please enter a number between 1 and {len(stages)}.")
+                print(
+                    f"Invalid choice. Please enter a number between 1 and {len(stages)}."
+                )
         except ValueError:
             print("Invalid input. Please enter a number.")
         except KeyboardInterrupt:
@@ -1064,7 +1077,9 @@ Examples:
 
     # Input files
     parser.add_argument(
-        "--export-file", type=str, help="Path to Twos export file (Markdown with timestamps)"
+        "--export-file",
+        type=str,
+        help="Path to Twos export file (Markdown with timestamps)",
     )
     parser.add_argument(
         "--claude-config",
@@ -1080,10 +1095,15 @@ Examples:
         help="Non-interactive mode with default options (alias for --non-interactive)",
     )
     parser.add_argument(
-        "--non-interactive", action="store_true", help="Run without prompts using CLI flags"
+        "--non-interactive",
+        action="store_true",
+        help="Run without prompts using CLI flags",
     )
     parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Show detailed output from subcommands"
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show detailed output from subcommands",
     )
     parser.add_argument(
         "--no-color", action="store_true", help="Disable colored output"
@@ -1211,7 +1231,9 @@ Examples:
     else:
         print("\n" + "=" * 70)
         print("  Memex Twos MCP Setup Wizard")
-        print("  Transform your Twos exports into a queryable knowledge base for Claude.")
+        print(
+            "  Transform your Twos exports into a queryable knowledge base for Claude."
+        )
         print("=" * 70 + "\n")
 
     try:

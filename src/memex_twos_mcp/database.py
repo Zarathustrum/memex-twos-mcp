@@ -118,7 +118,10 @@ class TwosDatabase:
     def _init_vector_search(self):
         """Initialize sqlite-vec extension for vector similarity search."""
         if not SQLITE_VEC_AVAILABLE:
-            print("⚠️  sqlite-vec not installed. Vector search unavailable.", file=sys.stderr)
+            print(
+                "⚠️  sqlite-vec not installed. Vector search unavailable.",
+                file=sys.stderr,
+            )
             self.embeddings_enabled = False
             return
 
@@ -748,7 +751,10 @@ class TwosDatabase:
             try:
                 semantic_results = self._vector_search(query, limit=limit * 2)
             except Exception as e:
-                print(f"⚠️  Semantic search failed, falling back to lexical: {e}", file=sys.stderr)
+                print(
+                    f"⚠️  Semantic search failed, falling back to lexical: {e}",
+                    file=sys.stderr,
+                )
                 semantic_results = []
         else:
             semantic_results = []
@@ -946,7 +952,7 @@ class TwosDatabase:
             FROM lists l
             LEFT JOIN things t ON l.list_id = t.list_id
         """
-        params = []
+        params: List[Any] = []
 
         if list_type:
             query += " WHERE l.list_type = ?"
@@ -1012,9 +1018,7 @@ class TwosDatabase:
             ValueError: If no list identifier provided or invalid query
         """
         if not (list_id or list_date or list_name):
-            raise ValueError(
-                "Must provide one of: list_id, list_date, or list_name"
-            )
+            raise ValueError("Must provide one of: list_id, list_date, or list_name")
 
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -1073,7 +1077,7 @@ class TwosDatabase:
         kind: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        limit: int = 50
+        limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """
         Get rollups with optional filtering.
@@ -1155,7 +1159,7 @@ class TwosDatabase:
             WHERE rollup_id = ? AND role = 'hi'
             ORDER BY rank
             """,
-            (rollup_id,)
+            (rollup_id,),
         )
 
         highlight_ids = [(row[0], row[1]) for row in cursor.fetchall()]
@@ -1171,10 +1175,7 @@ class TwosDatabase:
         return results
 
     def search_rollups(
-        self,
-        keyword: str,
-        kind: Optional[str] = None,
-        limit: int = 20
+        self, keyword: str, kind: Optional[str] = None, limit: int = 20
     ) -> List[Dict[str, Any]]:
         """
         Search rollups by keyword (searches kw column).
@@ -1210,9 +1211,7 @@ class TwosDatabase:
     # ========================================================================
 
     def get_month_summary(
-        self,
-        month_id: Optional[str] = None,
-        offset: int = 0
+        self, month_id: Optional[str] = None, offset: int = 0
     ) -> Optional[Dict[str, Any]]:
         """
         Get a monthly summary by ID or offset.
@@ -1230,8 +1229,7 @@ class TwosDatabase:
         if month_id:
             # Fetch specific month
             cursor.execute(
-                "SELECT * FROM month_summaries WHERE month_id = ?",
-                (month_id,)
+                "SELECT * FROM month_summaries WHERE month_id = ?", (month_id,)
             )
             row = cursor.fetchone()
 
@@ -1244,7 +1242,10 @@ class TwosDatabase:
             if result.get("suggested_questions"):
                 try:
                     import json
-                    result["suggested_questions"] = json.loads(result["suggested_questions"])
+
+                    result["suggested_questions"] = json.loads(
+                        result["suggested_questions"]
+                    )
                 except json.JSONDecodeError:
                     result["suggested_questions"] = {"questions": []}
 
@@ -1258,7 +1259,7 @@ class TwosDatabase:
                 ORDER BY start_date DESC
                 LIMIT 1 OFFSET ?
                 """,
-                (offset,)
+                (offset,),
             )
             row = cursor.fetchone()
 
@@ -1271,7 +1272,10 @@ class TwosDatabase:
             if result.get("suggested_questions"):
                 try:
                     import json
-                    result["suggested_questions"] = json.loads(result["suggested_questions"])
+
+                    result["suggested_questions"] = json.loads(
+                        result["suggested_questions"]
+                    )
                 except json.JSONDecodeError:
                     result["suggested_questions"] = {"questions": []}
 
@@ -1296,7 +1300,7 @@ class TwosDatabase:
             ORDER BY start_date DESC
             LIMIT ?
             """,
-            (limit,)
+            (limit,),
         )
 
         results = []
@@ -1307,7 +1311,10 @@ class TwosDatabase:
             if result.get("suggested_questions"):
                 try:
                     import json
-                    result["suggested_questions"] = json.loads(result["suggested_questions"])
+
+                    result["suggested_questions"] = json.loads(
+                        result["suggested_questions"]
+                    )
                 except json.JSONDecodeError:
                     result["suggested_questions"] = {"questions": []}
 
@@ -1336,7 +1343,7 @@ class TwosDatabase:
             WHERE month_id = ? AND role = 'hi'
             ORDER BY rank
             """,
-            (month_id,)
+            (month_id,),
         )
 
         highlight_ids = [(row[0], row[1]) for row in cursor.fetchall()]
@@ -1366,7 +1373,7 @@ class TwosDatabase:
 
         cursor.execute(
             "SELECT suggested_questions FROM month_summaries WHERE month_id = ?",
-            (month_id,)
+            (month_id,),
         )
 
         row = cursor.fetchone()
@@ -1376,6 +1383,7 @@ class TwosDatabase:
 
         try:
             import json
+
             questions_data = json.loads(row[0])
             return questions_data.get("questions", [])
         except json.JSONDecodeError:
@@ -1386,10 +1394,7 @@ class TwosDatabase:
     # ========================================================================
 
     def list_threads(
-        self,
-        status: str = "active",
-        kind: Optional[str] = None,
-        limit: int = 100
+        self, status: str = "active", kind: Optional[str] = None, limit: int = 100
     ) -> List[Dict[str, Any]]:
         """
         List threads filtered by status and kind.
@@ -1453,7 +1458,7 @@ class TwosDatabase:
                 ORDER BY bm25(threads_fts)
                 LIMIT ?
                 """,
-                (query, limit)
+                (query, limit),
             )
 
             results = [dict(row) for row in cursor.fetchall()]
@@ -1486,9 +1491,7 @@ class TwosDatabase:
         return dict(row)
 
     def get_thread_highlights(
-        self,
-        thread_id: str,
-        limit: int = 10
+        self, thread_id: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """
         Get full thing objects for thread highlights.
@@ -1512,7 +1515,7 @@ class TwosDatabase:
             ORDER BY rank
             LIMIT ?
             """,
-            (thread_id, limit)
+            (thread_id, limit),
         )
 
         highlight_ids = [(row[0], row[1]) for row in cursor.fetchall()]

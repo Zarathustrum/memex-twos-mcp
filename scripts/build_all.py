@@ -132,9 +132,7 @@ def build_derived_indices(
                 "builders_failed": builders,
                 "duration_seconds": 0.0,
                 "stats": {},
-                "errors": {
-                    "validation": f"Unknown builders: {', '.join(invalid)}"
-                },
+                "errors": {"validation": f"Unknown builders: {', '.join(invalid)}"},
             }
         builders_to_run = builders
 
@@ -198,9 +196,7 @@ def build_derived_indices(
         if missing_deps:
             skipped.append(builder_name)
             if verbose:
-                dep_names = ", ".join(
-                    BUILDER_METADATA[d]["name"] for d in missing_deps
-                )
+                dep_names = ", ".join(BUILDER_METADATA[d]["name"] for d in missing_deps)
                 print(f"  ⏭️  Skipped (dependency {dep_names} failed)")
             continue
 
@@ -209,7 +205,7 @@ def build_derived_indices(
             failed.append(builder_name)
             errors[builder_name] = "Failed to import builder module"
             if verbose:
-                print(f"  ❌ Failed (not loaded)")
+                print("  ❌ Failed (not loaded)")
             continue
 
         # Run builder
@@ -226,7 +222,9 @@ def build_derived_indices(
                     stats = result.get("stats", {})
                     if stats:
                         stats_str = ", ".join(
-                            f"{k}={v}" for k, v in stats.items() if isinstance(v, (int, float))
+                            f"{k}={v}"
+                            for k, v in stats.items()
+                            if isinstance(v, (int, float))
                         )
                         if stats_str:
                             print(f"     {stats_str}")
@@ -241,7 +239,7 @@ def build_derived_indices(
             failed.append(builder_name)
             errors[builder_name] = str(e)
             if verbose:
-                print(f"  ❌ Failed with exception:")
+                print("  ❌ Failed with exception:")
                 traceback.print_exc()
 
     # Update metadata for successful builds
@@ -279,7 +277,9 @@ def build_derived_indices(
     if verbose:
         success_count = len(succeeded)
         total_requested = len(builders_to_run) - len(skipped)
-        print(f"\nSummary: {success_count}/{total_requested} builders succeeded in {duration:.1f}s")
+        print(
+            f"\nSummary: {success_count}/{total_requested} builders succeeded in {duration:.1f}s"
+        )
 
         if skipped:
             print(f"Skipped: {len(skipped)} (dependency failures)")

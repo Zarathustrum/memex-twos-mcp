@@ -14,7 +14,7 @@ import pytest
 # Add scripts directory to path for importing build_all
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from build_all import build_derived_indices  # type: ignore
+from build_all import build_derived_indices  # type: ignore  # noqa: E402
 
 
 def create_mock_builder_module(build_func: MagicMock) -> ModuleType:
@@ -248,7 +248,9 @@ def test_invalid_builder_names(test_db: Path) -> None:
     assert "Unknown builders" in result["errors"]["validation"]
 
 
-def test_default_builders_no_llm(test_db: Path, mock_builder_success: MagicMock) -> None:
+def test_default_builders_no_llm(
+    test_db: Path, mock_builder_success: MagicMock
+) -> None:
     """Test that default builders are timepacks + threads (no LLM)."""
     mock_timepacks = create_mock_builder_module(mock_builder_success)
     mock_threads = create_mock_builder_module(mock_builder_success)
@@ -341,7 +343,9 @@ def test_import_failure_handling(test_db: Path) -> None:
     assert "timepacks" in result["builders_failed"]
 
 
-def test_metadata_timestamp_format(test_db: Path, mock_builder_success: MagicMock) -> None:
+def test_metadata_timestamp_format(
+    test_db: Path, mock_builder_success: MagicMock
+) -> None:
     """Test that metadata timestamps are in ISO format."""
     mock_timepacks = create_mock_builder_module(mock_builder_success)
 
@@ -351,9 +355,7 @@ def test_metadata_timestamp_format(test_db: Path, mock_builder_success: MagicMoc
             "build_timepacks": mock_timepacks,
         },
     ):
-        build_derived_indices(
-            db_path=test_db, builders=["timepacks"], verbose=False
-        )
+        build_derived_indices(db_path=test_db, builders=["timepacks"], verbose=False)
 
     conn = sqlite3.connect(test_db)
     cur = conn.cursor()
@@ -391,9 +393,7 @@ def test_verbose_output(
             "build_timepacks": mock_timepacks,
         },
     ):
-        build_derived_indices(
-            db_path=test_db, builders=["timepacks"], verbose=True
-        )
+        build_derived_indices(db_path=test_db, builders=["timepacks"], verbose=True)
 
     captured = capsys.readouterr()
     assert "Building derived indices" in captured.out
@@ -413,9 +413,7 @@ def test_quiet_mode(
             "build_timepacks": mock_timepacks,
         },
     ):
-        build_derived_indices(
-            db_path=test_db, builders=["timepacks"], verbose=False
-        )
+        build_derived_indices(db_path=test_db, builders=["timepacks"], verbose=False)
 
     captured = capsys.readouterr()
     assert captured.out == ""

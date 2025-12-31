@@ -54,8 +54,8 @@ def parse_timestamp(timestamp_str: str) -> Optional[str]:
     formats = [
         "%m/%d/%y %I:%M %p",
         "%m/%d/%y %I:%M%p",
-        "%m/%d/%Y %I:%M %p",   # 4-digit year support
-        "%m/%d/%Y %I:%M%p",    # 4-digit year without space before am/pm
+        "%m/%d/%Y %I:%M %p",  # 4-digit year support
+        "%m/%d/%Y %I:%M%p",  # 4-digit year without space before am/pm
     ]
 
     timestamp_str = timestamp_str.strip()

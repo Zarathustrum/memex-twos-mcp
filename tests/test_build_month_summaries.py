@@ -13,18 +13,18 @@ import json
 import re
 import sqlite3
 import tempfile
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 # Import builder functions
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from build_month_summaries import (
-    build,
+from build_month_summaries import (  # noqa: E402
     build_llm_prompt,
     build_month_summary,
     build_ms1_pack,
@@ -44,7 +44,8 @@ def temp_db():
     cursor = conn.cursor()
 
     # Minimal schema for testing
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE things (
             id TEXT PRIMARY KEY,
             timestamp DATETIME NOT NULL,
@@ -54,16 +55,20 @@ def temp_db():
             is_pending BOOLEAN DEFAULT 0,
             is_strikethrough BOOLEAN DEFAULT 0
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE thing_tags (
             thing_id TEXT,
             tag_id INTEGER,
@@ -71,16 +76,20 @@ def temp_db():
             FOREIGN KEY (thing_id) REFERENCES things(id),
             FOREIGN KEY (tag_id) REFERENCES tags(id)
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE people (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE thing_people (
             thing_id TEXT,
             person_id INTEGER,
@@ -88,16 +97,20 @@ def temp_db():
             FOREIGN KEY (thing_id) REFERENCES things(id),
             FOREIGN KEY (person_id) REFERENCES people(id)
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE imports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             imported_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE month_summaries (
             month_id TEXT PRIMARY KEY,
             start_date TEXT NOT NULL,
@@ -115,9 +128,11 @@ def temp_db():
             updated_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (build_import_id) REFERENCES imports(id)
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE month_summary_evidence (
             month_id TEXT NOT NULL,
             thing_id TEXT NOT NULL,
@@ -127,7 +142,8 @@ def temp_db():
             FOREIGN KEY (month_id) REFERENCES month_summaries(month_id) ON DELETE CASCADE,
             FOREIGN KEY (thing_id) REFERENCES things(id) ON DELETE CASCADE
         )
-    """)
+    """
+    )
 
     conn.commit()
     conn.close()
@@ -165,21 +181,21 @@ def test_validate_llm_response_valid():
                 "text": "What progress on work planning?",
                 "anchors": ["task_001", "task_002"],
                 "thread_id": "thr:tag:work",
-                "rationale": "High activity"
+                "rationale": "High activity",
             },
             {
                 "text": "How did health evolve?",
                 "anchors": ["task_003"],
                 "thread_id": "thr:tag:health",
-                "rationale": "New thread"
+                "rationale": "New thread",
             },
             {
                 "text": "What's happening at home?",
                 "anchors": ["task_005"],
                 "thread_id": "thr:tag:home",
-                "rationale": "Multiple tasks"
-            }
-        ]
+                "rationale": "Multiple tasks",
+            },
+        ],
     }
 
     is_valid, error = validate_llm_response(response, candidate_ids)
@@ -197,9 +213,8 @@ def test_validate_llm_response_invalid_thing_id():
             {"name": "work", "thing_ids": ["task_001", "task_999"]},  # Invalid ID
         ],
         "highlights": [{"thing_id": "task_001", "label": "test"}] * 10,
-        "questions": [
-            {"text": "Test?", "anchors": ["task_001"], "rationale": "Test"}
-        ] * 3
+        "questions": [{"text": "Test?", "anchors": ["task_001"], "rationale": "Test"}]
+        * 3,
     }
 
     is_valid, error = validate_llm_response(response, candidate_ids)
@@ -214,12 +229,14 @@ def test_validate_llm_response_invalid_theme_name():
 
     response = {
         "themes": [
-            {"name": "Work Planning!", "thing_ids": ["task_001", "task_002"]},  # Invalid chars
+            {
+                "name": "Work Planning!",
+                "thing_ids": ["task_001", "task_002"],
+            },  # Invalid chars
         ],
         "highlights": [{"thing_id": "task_001", "label": "test"}] * 10,
-        "questions": [
-            {"text": "Test?", "anchors": ["task_001"], "rationale": "Test"}
-        ] * 3
+        "questions": [{"text": "Test?", "anchors": ["task_001"], "rationale": "Test"}]
+        * 3,
     }
 
     is_valid, error = validate_llm_response(response, candidate_ids)
@@ -235,11 +252,11 @@ def test_validate_llm_response_wrong_highlight_count():
     response = {
         "themes": [
             {"name": "work", "thing_ids": ["task_001", "task_002"]},
-        ] * 3,
+        ]
+        * 3,
         "highlights": [{"thing_id": "task_001", "label": "test"}] * 5,  # Too few
-        "questions": [
-            {"text": "Test?", "anchors": ["task_001"], "rationale": "Test"}
-        ] * 3
+        "questions": [{"text": "Test?", "anchors": ["task_001"], "rationale": "Test"}]
+        * 3,
     }
 
     is_valid, error = validate_llm_response(response, candidate_ids)
@@ -255,15 +272,17 @@ def test_validate_llm_response_long_question():
     response = {
         "themes": [
             {"name": "work", "thing_ids": ["task_001", "task_002"]},
-        ] * 3,
+        ]
+        * 3,
         "highlights": [{"thing_id": "task_001", "label": "test"}] * 10,
         "questions": [
             {
                 "text": "A" * 101,  # Too long
                 "anchors": ["task_001"],
-                "rationale": "Test"
+                "rationale": "Test",
             }
-        ] * 3
+        ]
+        * 3,
     }
 
     is_valid, error = validate_llm_response(response, candidate_ids)
@@ -292,7 +311,7 @@ def test_build_ms1_pack_format():
         people_summary="alice:7,bob:3",
         themes=themes,
         highlights=highlights,
-        question_count=3
+        question_count=3,
     )
 
     # Validate format
@@ -314,9 +333,7 @@ def test_build_ms1_pack_regex():
     themes = [{"name": "test", "thing_ids": ["task_001", "task_002"]}]
     highlights = [{"thing_id": "task_001", "label": "test"}]
 
-    pack = build_ms1_pack(
-        "2025-12", 100, "work:10", "alice:5", themes, highlights, 3
-    )
+    pack = build_ms1_pack("2025-12", 100, "work:10", "alice:5", themes, highlights, 3)
 
     # Regex pattern for MS1 format
     pattern = r"^MS1\|m=\d{4}-\d{2}\|n=\d+\|tg=.*\|pp=.*\|th=.*\|hi=.*\|nq=\d+$"
@@ -332,7 +349,7 @@ def test_build_llm_prompt_format():
             "timestamp": "2025-12-15T10:00:00",
             "content": "Test content",
             "tags": ["work"],
-            "people_mentioned": ["Alice"]
+            "people_mentioned": ["Alice"],
         }
     ]
 
@@ -343,7 +360,7 @@ def test_build_llm_prompt_format():
         thing_count=100,
         tags_summary="work:48",
         people_summary="alice:7",
-        candidates=candidates
+        candidates=candidates,
     )
 
     # Check key sections
@@ -379,7 +396,7 @@ def test_generate_month_windows():
     assert windows[2][1] == date(2026, 1, 31)
 
 
-@patch('build_month_summaries.invoke_llm_via_claude_code')
+@patch("build_month_summaries.invoke_llm_via_claude_code")
 def test_build_month_summary_with_mock(mock_llm, temp_db):
     """Test month summary building with mocked LLM."""
     conn = sqlite3.connect(temp_db)
@@ -392,7 +409,12 @@ def test_build_month_summary_with_mock(mock_llm, temp_db):
             INSERT INTO things (id, timestamp, content, content_hash)
             VALUES (?, ?, ?, ?)
             """,
-            (f"task_{i:03d}", f"2025-12-{i+1:02d} 10:00:00", f"Test content {i}", f"hash{i}")
+            (
+                f"task_{i:03d}",
+                f"2025-12-{i+1:02d} 10:00:00",
+                f"Test content {i}",
+                f"hash{i}",
+            ),
         )
 
     conn.commit()
@@ -405,38 +427,33 @@ def test_build_month_summary_with_mock(mock_llm, temp_db):
             {"name": "home", "thing_ids": ["task_004", "task_005"]},
         ],
         "highlights": [
-            {"thing_id": f"task_{i:03d}", "label": f"item_{i}"}
-            for i in range(10)
+            {"thing_id": f"task_{i:03d}", "label": f"item_{i}"} for i in range(10)
         ],
         "questions": [
             {
                 "text": "What happened with work?",
                 "anchors": ["task_000", "task_001"],
                 "thread_id": "thr:tag:work",
-                "rationale": "High activity"
+                "rationale": "High activity",
             },
             {
                 "text": "Health progress?",
                 "anchors": ["task_002"],
                 "thread_id": "thr:tag:health",
-                "rationale": "New thread"
+                "rationale": "New thread",
             },
             {
                 "text": "Home updates?",
                 "anchors": ["task_004"],
                 "thread_id": "thr:tag:home",
-                "rationale": "Multiple tasks"
-            }
-        ]
+                "rationale": "Multiple tasks",
+            },
+        ],
     }
 
     # Build summary
     was_built, error = build_month_summary(
-        conn,
-        date(2025, 12, 1),
-        date(2025, 12, 31),
-        force=False,
-        dry_run=False
+        conn, date(2025, 12, 1), date(2025, 12, 31), force=False, dry_run=False
     )
 
     assert was_built
@@ -457,7 +474,7 @@ def test_build_month_summary_with_mock(mock_llm, temp_db):
     conn.close()
 
 
-@patch('build_month_summaries.invoke_llm_via_claude_code')
+@patch("build_month_summaries.invoke_llm_via_claude_code")
 def test_build_month_summary_llm_failure(mock_llm, temp_db):
     """Test graceful handling of LLM failure."""
     conn = sqlite3.connect(temp_db)
@@ -466,7 +483,7 @@ def test_build_month_summary_llm_failure(mock_llm, temp_db):
     # Insert test data
     cursor.execute(
         "INSERT INTO things (id, timestamp, content, content_hash) VALUES (?, ?, ?, ?)",
-        ("task_001", "2025-12-15 10:00:00", "Test", "hash1")
+        ("task_001", "2025-12-15 10:00:00", "Test", "hash1"),
     )
     conn.commit()
 
@@ -475,11 +492,7 @@ def test_build_month_summary_llm_failure(mock_llm, temp_db):
 
     # Build summary
     was_built, error = build_month_summary(
-        conn,
-        date(2025, 12, 1),
-        date(2025, 12, 31),
-        force=False,
-        dry_run=False
+        conn, date(2025, 12, 1), date(2025, 12, 31), force=False, dry_run=False
     )
 
     assert not was_built
@@ -489,7 +502,7 @@ def test_build_month_summary_llm_failure(mock_llm, temp_db):
     conn.close()
 
 
-@patch('build_month_summaries.invoke_llm_via_claude_code')
+@patch("build_month_summaries.invoke_llm_via_claude_code")
 def test_build_month_summary_validation_failure(mock_llm, temp_db):
     """Test validation failure handling."""
     conn = sqlite3.connect(temp_db)
@@ -498,7 +511,7 @@ def test_build_month_summary_validation_failure(mock_llm, temp_db):
     # Insert test data
     cursor.execute(
         "INSERT INTO things (id, timestamp, content, content_hash) VALUES (?, ?, ?, ?)",
-        ("task_001", "2025-12-15 10:00:00", "Test", "hash1")
+        ("task_001", "2025-12-15 10:00:00", "Test", "hash1"),
     )
     conn.commit()
 
@@ -506,22 +519,16 @@ def test_build_month_summary_validation_failure(mock_llm, temp_db):
     mock_llm.return_value = {
         "themes": [
             {"name": "work", "thing_ids": ["task_999", "task_888"]},  # Invalid IDs
-        ] * 3,
-        "highlights": [
-            {"thing_id": "task_999", "label": "fake"}
-        ] * 10,
-        "questions": [
-            {"text": "Test?", "anchors": ["task_999"], "rationale": "Test"}
-        ] * 3
+        ]
+        * 3,
+        "highlights": [{"thing_id": "task_999", "label": "fake"}] * 10,
+        "questions": [{"text": "Test?", "anchors": ["task_999"], "rationale": "Test"}]
+        * 3,
     }
 
     # Build summary
     was_built, error = build_month_summary(
-        conn,
-        date(2025, 12, 1),
-        date(2025, 12, 31),
-        force=False,
-        dry_run=False
+        conn, date(2025, 12, 1), date(2025, 12, 31), force=False, dry_run=False
     )
 
     assert not was_built
@@ -539,17 +546,13 @@ def test_dry_run_mode(temp_db):
     # Insert test data
     cursor.execute(
         "INSERT INTO things (id, timestamp, content, content_hash) VALUES (?, ?, ?, ?)",
-        ("task_001", "2025-12-15 10:00:00", "Test", "hash1")
+        ("task_001", "2025-12-15 10:00:00", "Test", "hash1"),
     )
     conn.commit()
 
     # Build in dry-run mode
     was_built, error = build_month_summary(
-        conn,
-        date(2025, 12, 1),
-        date(2025, 12, 31),
-        force=False,
-        dry_run=True
+        conn, date(2025, 12, 1), date(2025, 12, 31), force=False, dry_run=True
     )
 
     assert not was_built

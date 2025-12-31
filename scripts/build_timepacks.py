@@ -38,23 +38,139 @@ import time
 from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 # Common English stopwords for keyword extraction
 STOPWORDS = {
-    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and",
-    "any", "are", "as", "at", "be", "because", "been", "before", "being", "below",
-    "between", "both", "but", "by", "can", "did", "do", "does", "doing", "don",
-    "down", "during", "each", "few", "for", "from", "further", "had", "has", "have",
-    "having", "he", "her", "here", "hers", "herself", "him", "himself", "his", "how",
-    "i", "if", "in", "into", "is", "it", "its", "itself", "just", "me", "might",
-    "more", "most", "my", "myself", "no", "nor", "not", "now", "of", "off", "on",
-    "once", "only", "or", "other", "our", "ours", "ourselves", "out", "over", "own",
-    "s", "same", "she", "should", "so", "some", "such", "t", "than", "that", "the",
-    "their", "theirs", "them", "themselves", "then", "there", "these", "they", "this",
-    "those", "through", "to", "too", "under", "until", "up", "very", "was", "we",
-    "were", "what", "when", "where", "which", "while", "who", "whom", "why", "will",
-    "with", "would", "you", "your", "yours", "yourself", "yourselves"
+    "a",
+    "about",
+    "above",
+    "after",
+    "again",
+    "against",
+    "all",
+    "am",
+    "an",
+    "and",
+    "any",
+    "are",
+    "as",
+    "at",
+    "be",
+    "because",
+    "been",
+    "before",
+    "being",
+    "below",
+    "between",
+    "both",
+    "but",
+    "by",
+    "can",
+    "did",
+    "do",
+    "does",
+    "doing",
+    "don",
+    "down",
+    "during",
+    "each",
+    "few",
+    "for",
+    "from",
+    "further",
+    "had",
+    "has",
+    "have",
+    "having",
+    "he",
+    "her",
+    "here",
+    "hers",
+    "herself",
+    "him",
+    "himself",
+    "his",
+    "how",
+    "i",
+    "if",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "itself",
+    "just",
+    "me",
+    "might",
+    "more",
+    "most",
+    "my",
+    "myself",
+    "no",
+    "nor",
+    "not",
+    "now",
+    "of",
+    "off",
+    "on",
+    "once",
+    "only",
+    "or",
+    "other",
+    "our",
+    "ours",
+    "ourselves",
+    "out",
+    "over",
+    "own",
+    "s",
+    "same",
+    "she",
+    "should",
+    "so",
+    "some",
+    "such",
+    "t",
+    "than",
+    "that",
+    "the",
+    "their",
+    "theirs",
+    "them",
+    "themselves",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "through",
+    "to",
+    "too",
+    "under",
+    "until",
+    "up",
+    "very",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "who",
+    "whom",
+    "why",
+    "will",
+    "with",
+    "would",
+    "you",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves",
 }
 
 
@@ -79,11 +195,7 @@ def compute_src_hash(things: List[Dict[str, Any]]) -> str:
     return hashlib.sha256(hash_input.encode()).hexdigest()
 
 
-def score_highlight(
-    thing: Dict[str, Any],
-    end_date: date,
-    window_days: int
-) -> float:
+def score_highlight(thing: Dict[str, Any], end_date: date, window_days: int) -> float:
     """
     Deterministic highlight scoring using weighted formula.
 
@@ -132,10 +244,10 @@ def score_highlight(
 
     # Weighted combination
     score = (
-        recency_score * 0.40 +
-        entity_density_score * 0.30 +
-        content_length_score * 0.20 +
-        status_score * 0.10
+        recency_score * 0.40
+        + entity_density_score * 0.30
+        + content_length_score * 0.20
+        + status_score * 0.10
     )
 
     return score
@@ -169,7 +281,7 @@ def extract_keywords(things: List[Dict[str, Any]], top_n: int = 20) -> List[str]
     for thing in things:
         content = thing.get("content", "").lower()
         # Extract words (alphanumeric sequences)
-        tokens = re.findall(r'\b[a-z]+\b', content)
+        tokens = re.findall(r"\b[a-z]+\b", content)
 
         for token in tokens:
             # Skip stopwords, single chars, numbers
@@ -195,7 +307,7 @@ def make_label(content: str, max_len: int = 32) -> str:
         Snake-cased label
     """
     # Extract first few words
-    words = re.findall(r'\b[a-zA-Z0-9]+\b', content)[:4]
+    words = re.findall(r"\b[a-zA-Z0-9]+\b", content)[:4]
 
     # Convert to snake_case
     label = "_".join(words).lower()
@@ -212,7 +324,7 @@ def build_tp1_pack(
     start_date: str,
     end_date: str,
     things: List[Dict[str, Any]],
-    highlights: List[Dict[str, Any]]
+    highlights: List[Dict[str, Any]],
 ) -> str:
     """
     Build TP1 format pack string.
@@ -251,7 +363,11 @@ def build_tp1_pack(
             people_counts[person] += 1
 
     top_people = people_counts.most_common(8)
-    pp_str = ",".join(f"{person}:{count}" for person, count in top_people) if top_people else ""
+    pp_str = (
+        ",".join(f"{person}:{count}" for person, count in top_people)
+        if top_people
+        else ""
+    )
 
     # Keywords (top 20)
     keywords = extract_keywords(things, top_n=20)
@@ -287,9 +403,7 @@ def build_tp1_pack(
 
 
 def fetch_things_in_window(
-    conn: sqlite3.Connection,
-    start_date: str,
-    end_date: str
+    conn: sqlite3.Connection, start_date: str, end_date: str
 ) -> List[Dict[str, Any]]:
     """
     Fetch all things with full details in date range.
@@ -312,7 +426,7 @@ def fetch_things_in_window(
         WHERE DATE(timestamp) BETWEEN ? AND ?
         ORDER BY timestamp
         """,
-        (start_date, end_date)
+        (start_date, end_date),
     )
 
     things = []
@@ -327,7 +441,7 @@ def fetch_things_in_window(
             JOIN thing_tags tt ON t.id = tt.tag_id
             WHERE tt.thing_id = ?
             """,
-            (thing_id,)
+            (thing_id,),
         )
         thing["tags"] = [r[0] for r in cursor.fetchall()]
 
@@ -338,7 +452,7 @@ def fetch_things_in_window(
             JOIN thing_people tp ON p.id = tp.person_id
             WHERE tp.thing_id = ?
             """,
-            (thing_id,)
+            (thing_id,),
         )
         thing["people_mentioned"] = [r[0] for r in cursor.fetchall()]
 
@@ -347,10 +461,7 @@ def fetch_things_in_window(
     return things
 
 
-def generate_day_windows(
-    start_date: date,
-    end_date: date
-) -> List[Tuple[date, date]]:
+def generate_day_windows(start_date: date, end_date: date) -> List[Tuple[date, date]]:
     """Generate day windows (single day each)."""
     windows = []
     current = start_date
@@ -362,10 +473,7 @@ def generate_day_windows(
     return windows
 
 
-def generate_week_windows(
-    start_date: date,
-    end_date: date
-) -> List[Tuple[date, date]]:
+def generate_week_windows(start_date: date, end_date: date) -> List[Tuple[date, date]]:
     """
     Generate ISO 8601 week windows (Monday-based).
 
@@ -391,10 +499,7 @@ def generate_week_windows(
     return windows
 
 
-def generate_month_windows(
-    start_date: date,
-    end_date: date
-) -> List[Tuple[date, date]]:
+def generate_month_windows(start_date: date, end_date: date) -> List[Tuple[date, date]]:
     """Generate month windows (calendar months)."""
     windows = []
 
@@ -425,7 +530,7 @@ def build_rollup(
     start_date: date,
     end_date: date,
     force: bool = False,
-    builder_v: str = "1.0"
+    builder_v: str = "1.0",
 ) -> bool:
     """
     Build a single rollup window.
@@ -444,19 +549,15 @@ def build_rollup(
     cursor = conn.cursor()
 
     # Generate rollup_id
-    if kind == 'd':
+    if kind == "d":
         rollup_id = f"d:{start_date.isoformat()}"
-    elif kind == 'w':
+    elif kind == "w":
         rollup_id = f"w:{start_date.isoformat()}"  # Monday date
     else:  # 'm'
         rollup_id = f"m:{start_date.strftime('%Y-%m')}"
 
     # Fetch things in window
-    things = fetch_things_in_window(
-        conn,
-        start_date.isoformat(),
-        end_date.isoformat()
-    )
+    things = fetch_things_in_window(conn, start_date.isoformat(), end_date.isoformat())
 
     if not things:
         # No data in window, skip
@@ -466,10 +567,7 @@ def build_rollup(
     src_hash = compute_src_hash(things)
 
     # Check existing rollup
-    cursor.execute(
-        "SELECT src_hash FROM rollups WHERE rollup_id = ?",
-        (rollup_id,)
-    )
+    cursor.execute("SELECT src_hash FROM rollups WHERE rollup_id = ?", (rollup_id,))
     row = cursor.fetchone()
 
     if row and row[0] == src_hash and not force:
@@ -492,11 +590,7 @@ def build_rollup(
 
     # Build TP1 pack
     pack = build_tp1_pack(
-        kind,
-        start_date.isoformat(),
-        end_date.isoformat(),
-        things,
-        highlights
+        kind, start_date.isoformat(), end_date.isoformat(), things, highlights
     )
 
     # Extract keywords for search column
@@ -523,10 +617,20 @@ def build_rollup(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            rollup_id, kind, start_date.isoformat(), end_date.isoformat(),
-            thing_count, completed_count, pending_count, strikethrough_count,
-            1, pack, kw_text, src_hash, builder_v
-        )
+            rollup_id,
+            kind,
+            start_date.isoformat(),
+            end_date.isoformat(),
+            thing_count,
+            completed_count,
+            pending_count,
+            strikethrough_count,
+            1,
+            pack,
+            kw_text,
+            src_hash,
+            builder_v,
+        ),
     )
 
     # Insert highlights
@@ -536,7 +640,7 @@ def build_rollup(
             INSERT INTO rollup_evidence (rollup_id, thing_id, role, rank)
             VALUES (?, ?, 'hi', ?)
             """,
-            (rollup_id, thing["id"], rank)
+            (rollup_id, thing["id"], rank),
         )
 
     # Insert evidence
@@ -546,17 +650,14 @@ def build_rollup(
             INSERT INTO rollup_evidence (rollup_id, thing_id, role, rank)
             VALUES (?, ?, 'ev', ?)
             """,
-            (rollup_id, thing["id"], rank)
+            (rollup_id, thing["id"], rank),
         )
 
     return True
 
 
 def build(
-    db_path: Path,
-    force: bool = False,
-    months: int = 12,
-    kinds: str = "d,w,m"
+    db_path: Path, force: bool = False, months: int = 12, kinds: str = "d,w,m"
 ) -> Dict[str, Any]:
     """
     Build time-based rollups (days, weeks, months).
@@ -594,9 +695,7 @@ def build(
         kind_list = [k.strip() for k in kinds.split(",")]
 
         # Get date range from things table
-        cursor.execute(
-            "SELECT MIN(DATE(timestamp)), MAX(DATE(timestamp)) FROM things"
-        )
+        cursor.execute("SELECT MIN(DATE(timestamp)), MAX(DATE(timestamp)) FROM things")
         row = cursor.fetchone()
 
         if not row[0] or not row[1]:
@@ -604,7 +703,7 @@ def build(
                 "success": False,
                 "error": "No things found in database",
                 "stats": {},
-                "duration_seconds": time.time() - start_time
+                "duration_seconds": time.time() - start_time,
             }
 
         min_date = datetime.fromisoformat(row[0]).date()
@@ -622,25 +721,23 @@ def build(
             "month_count": 0,
             "new_count": 0,
             "updated_count": 0,
-            "skipped_count": 0
+            "skipped_count": 0,
         }
 
         # Build rollups by kind
         for kind in kind_list:
-            if kind == 'd':
+            if kind == "d":
                 windows = generate_day_windows(min_date, max_date)
-            elif kind == 'w':
+            elif kind == "w":
                 windows = generate_week_windows(min_date, max_date)
-            elif kind == 'm':
+            elif kind == "m":
                 windows = generate_month_windows(min_date, max_date)
             else:
                 continue
 
             # Build each window
             for start_date, end_date in windows:
-                was_built = build_rollup(
-                    conn, kind, start_date, end_date, force
-                )
+                was_built = build_rollup(conn, kind, start_date, end_date, force)
 
                 if was_built:
                     stats["new_count"] += 1
@@ -648,9 +745,9 @@ def build(
                     stats["skipped_count"] += 1
 
                 # Update kind count
-                if kind == 'd':
+                if kind == "d":
                     stats["day_count"] += 1
-                elif kind == 'w':
+                elif kind == "w":
                     stats["week_count"] += 1
                 else:
                     stats["month_count"] += 1
@@ -658,7 +755,9 @@ def build(
             # Commit after each kind (batch commit)
             conn.commit()
 
-        stats["rollup_count"] = stats["day_count"] + stats["week_count"] + stats["month_count"]
+        stats["rollup_count"] = (
+            stats["day_count"] + stats["week_count"] + stats["month_count"]
+        )
 
         conn.close()
 
@@ -668,7 +767,7 @@ def build(
             "success": True,
             "stats": stats,
             "duration_seconds": round(duration, 2),
-            "error": None
+            "error": None,
         }
 
     except Exception as e:
@@ -676,7 +775,7 @@ def build(
             "success": False,
             "error": str(e),
             "stats": {},
-            "duration_seconds": time.time() - start_time
+            "duration_seconds": time.time() - start_time,
         }
 
 
@@ -689,24 +788,22 @@ def main():
         "--db",
         type=Path,
         default=Path("data/processed/twos.db"),
-        help="Path to SQLite database (default: data/processed/twos.db)"
+        help="Path to SQLite database (default: data/processed/twos.db)",
     )
     parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force rebuild (ignore src_hash)"
+        "--force", action="store_true", help="Force rebuild (ignore src_hash)"
     )
     parser.add_argument(
         "--months",
         type=int,
         default=12,
-        help="Number of months of history to build (default: 12)"
+        help="Number of months of history to build (default: 12)",
     )
     parser.add_argument(
         "--kinds",
         type=str,
         default="d,w,m",
-        help="Comma-separated rollup kinds to build (default: d,w,m)"
+        help="Comma-separated rollup kinds to build (default: d,w,m)",
     )
 
     args = parser.parse_args()
@@ -722,10 +819,7 @@ def main():
     print()
 
     result = build(
-        db_path=args.db,
-        force=args.force,
-        months=args.months,
-        kinds=args.kinds
+        db_path=args.db, force=args.force, months=args.months, kinds=args.kinds
     )
 
     if result["success"]:

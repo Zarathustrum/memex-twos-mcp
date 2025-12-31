@@ -25,13 +25,10 @@ MS1|m=<YYYY-MM>|n=<total>|tg=<tag:count,...>|pp=<person:count,...>|th=<theme@thi
 """
 
 import argparse
-import hashlib
 import json
 import re
 import sqlite3
-import subprocess
 import sys
-import tempfile
 import time
 from collections import Counter
 from datetime import date, datetime, timedelta
@@ -41,7 +38,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # Reuse scoring from build_timepacks
 sys.path.insert(0, str(Path(__file__).parent))
 try:
-    from build_timepacks import compute_src_hash, score_highlight, make_label
+    from build_timepacks import compute_src_hash, score_highlight
     from llm_utils import invoke_llm
 except ImportError as e:
     print(f"ERROR: Could not import required modules: {e}", file=sys.stderr)
@@ -74,9 +71,7 @@ def invoke_llm_via_claude_code(prompt: str, timeout: int = 120) -> Dict[str, Any
 
 
 def fetch_things_in_month(
-    conn: sqlite3.Connection,
-    month_start: str,
-    month_end: str
+    conn: sqlite3.Connection, month_start: str, month_end: str
 ) -> List[Dict[str, Any]]:
     """
     Fetch all things in month with full details.
@@ -98,7 +93,7 @@ def fetch_things_in_month(
         WHERE DATE(timestamp) BETWEEN ? AND ?
         ORDER BY timestamp DESC
         """,
-        (month_start, month_end)
+        (month_start, month_end),
     )
 
     things = []
@@ -113,7 +108,7 @@ def fetch_things_in_month(
             JOIN thing_tags tt ON t.id = tt.tag_id
             WHERE tt.thing_id = ?
             """,
-            (thing_id,)
+            (thing_id,),
         )
         thing["tags"] = [r[0] for r in cursor.fetchall()]
 
@@ -124,7 +119,7 @@ def fetch_things_in_month(
             JOIN thing_people tp ON p.id = tp.person_id
             WHERE tp.thing_id = ?
             """,
-            (thing_id,)
+            (thing_id,),
         )
         thing["people_mentioned"] = [r[0] for r in cursor.fetchall()]
 
@@ -140,7 +135,7 @@ def build_llm_prompt(
     thing_count: int,
     tags_summary: str,
     people_summary: str,
-    candidates: List[Dict[str, Any]]
+    candidates: List[Dict[str, Any]],
 ) -> str:
     """
     Build prompt for LLM semantic analysis.
@@ -172,7 +167,8 @@ def build_llm_prompt(
     candidates_text = "\n".join(candidate_lines)
 
     prompt = f"""SYSTEM / ROLE
-You are a deterministic JSON generator. You must return ONLY valid JSON that matches the schema exactly. No markdown, no commentary, no extra keys, no trailing commas.
+You are a deterministic JSON generator. You must return ONLY valid JSON that matches the schema exactly.
+No markdown, no commentary, no extra keys, no trailing commas.
 
 TASK CONTEXT
 You are analyzing a month of personal "things" (tasks/journal/list items) for contextual framing.
@@ -261,8 +257,7 @@ OUTPUT SCHEMA (RETURN EXACTLY THIS SHAPE)
 
 
 def validate_llm_response(
-    response: Dict[str, Any],
-    candidate_ids: set
+    response: Dict[str, Any], candidate_ids: set
 ) -> Tuple[bool, Optional[str]]:
     """
     Validate LLM response structure and content.
@@ -284,11 +279,15 @@ def validate_llm_response(
         return False, f"Expected 3-8 themes, got {len(themes)}"
 
     for theme in themes:
-        if not isinstance(theme, dict) or "name" not in theme or "thing_ids" not in theme:
+        if (
+            not isinstance(theme, dict)
+            or "name" not in theme
+            or "thing_ids" not in theme
+        ):
             return False, "Invalid theme structure"
 
         name = theme["name"]
-        if not re.match(r'^[a-z_]{1,32}$', name):
+        if not re.match(r"^[a-z_]{1,32}$", name):
             return False, f"Invalid theme name: {name}"
 
         thing_ids = theme["thing_ids"]
@@ -312,7 +311,7 @@ def validate_llm_response(
             return False, f"Highlight references invalid thing_id: {hl['thing_id']}"
 
         label = hl["label"]
-        if not re.match(r'^[a-z0-9_]{1,32}$', label):
+        if not re.match(r"^[a-z0-9_]{1,32}$", label):
             return False, f"Invalid highlight label: {label}"
 
     # Validate questions
@@ -341,7 +340,7 @@ def build_ms1_pack(
     people_summary: str,
     themes: List[Dict[str, Any]],
     highlights: List[Dict[str, Any]],
-    question_count: int
+    question_count: int,
 ) -> str:
     """
     Build MS1 format pack string.
@@ -400,7 +399,7 @@ def build_month_summary(
     month_end: date,
     force: bool = False,
     dry_run: bool = False,
-    builder_v: str = "1.0"
+    builder_v: str = "1.0",
 ) -> Tuple[bool, Optional[str]]:
     """
     Build a single month summary.
@@ -422,11 +421,7 @@ def build_month_summary(
     print(f"  Processing {month_id}...", end=" ", flush=True)
 
     # Fetch things in month
-    things = fetch_things_in_month(
-        conn,
-        month_start.isoformat(),
-        month_end.isoformat()
-    )
+    things = fetch_things_in_month(conn, month_start.isoformat(), month_end.isoformat())
 
     if not things:
         print("SKIP (no data)")
@@ -437,8 +432,7 @@ def build_month_summary(
 
     # Check existing summary
     cursor.execute(
-        "SELECT src_hash FROM month_summaries WHERE month_id = ?",
-        (month_id,)
+        "SELECT src_hash FROM month_summaries WHERE month_id = ?", (month_id,)
     )
     row = cursor.fetchone()
 
@@ -484,7 +478,7 @@ def build_month_summary(
         len(things),
         tags_summary,
         people_summary,
-        candidates
+        candidates,
     )
 
     # Invoke LLM
@@ -520,19 +514,21 @@ def build_month_summary(
         people_summary,
         llm_response["themes"],
         llm_response["highlights"],
-        len(llm_response["questions"])
+        len(llm_response["questions"]),
     )
 
     # Build questions JSON
     questions_data = {"questions": []}
     for rank, q in enumerate(llm_response["questions"], 1):
-        questions_data["questions"].append({
-            "rank": rank,
-            "text": q["text"],
-            "anchors": q["anchors"],
-            "thread_id": q.get("thread_id", ""),
-            "rationale": q.get("rationale", "")
-        })
+        questions_data["questions"].append(
+            {
+                "rank": rank,
+                "text": q["text"],
+                "anchors": q["anchors"],
+                "thread_id": q.get("thread_id", ""),
+                "rationale": q.get("rationale", ""),
+            }
+        )
 
     questions_json = json.dumps(questions_data)
 
@@ -560,8 +556,8 @@ def build_month_summary(
             src_hash,
             builder_v,
             "claude-sonnet-4-5",
-            0.95  # High confidence for validated responses
-        )
+            0.95,  # High confidence for validated responses
+        ),
     )
 
     # Insert highlights
@@ -571,28 +567,29 @@ def build_month_summary(
             INSERT INTO month_summary_evidence (month_id, thing_id, role, rank)
             VALUES (?, ?, 'hi', ?)
             """,
-            (month_id, hl["thing_id"], rank)
+            (month_id, hl["thing_id"], rank),
         )
 
     # Insert evidence (remaining candidates)
-    evidence_ids = [t["id"] for t in candidates if t["id"] not in {h["thing_id"] for h in llm_response["highlights"]}]
+    evidence_ids = [
+        t["id"]
+        for t in candidates
+        if t["id"] not in {h["thing_id"] for h in llm_response["highlights"]}
+    ]
     for rank, thing_id in enumerate(evidence_ids[:20]):
         cursor.execute(
             """
             INSERT INTO month_summary_evidence (month_id, thing_id, role, rank)
             VALUES (?, ?, 'ev', ?)
             """,
-            (month_id, thing_id, rank)
+            (month_id, thing_id, rank),
         )
 
     print("OK")
     return True, None
 
 
-def generate_month_windows(
-    start_date: date,
-    end_date: date
-) -> List[Tuple[date, date]]:
+def generate_month_windows(start_date: date, end_date: date) -> List[Tuple[date, date]]:
     """Generate month windows (calendar months)."""
     windows = []
 
@@ -618,10 +615,7 @@ def generate_month_windows(
 
 
 def build(
-    db_path: Path,
-    force: bool = False,
-    months: int = 12,
-    dry_run: bool = False
+    db_path: Path, force: bool = False, months: int = 12, dry_run: bool = False
 ) -> Dict[str, Any]:
     """
     Build LLM-powered monthly summaries.
@@ -654,9 +648,7 @@ def build(
         cursor = conn.cursor()
 
         # Get date range from things table
-        cursor.execute(
-            "SELECT MIN(DATE(timestamp)), MAX(DATE(timestamp)) FROM things"
-        )
+        cursor.execute("SELECT MIN(DATE(timestamp)), MAX(DATE(timestamp)) FROM things")
         row = cursor.fetchone()
 
         if not row[0] or not row[1]:
@@ -664,7 +656,7 @@ def build(
                 "success": False,
                 "error": "No things found in database",
                 "stats": {},
-                "duration_seconds": time.time() - start_time
+                "duration_seconds": time.time() - start_time,
             }
 
         min_date = datetime.fromisoformat(row[0]).date()
@@ -683,7 +675,7 @@ def build(
             "new_count": 0,
             "updated_count": 0,
             "skipped_count": 0,
-            "failed_count": 0
+            "failed_count": 0,
         }
 
         # Build each month
@@ -712,7 +704,7 @@ def build(
             "success": True,
             "stats": stats,
             "duration_seconds": round(duration, 2),
-            "error": None
+            "error": None,
         }
 
     except Exception as e:
@@ -720,7 +712,7 @@ def build(
             "success": False,
             "error": str(e),
             "stats": {},
-            "duration_seconds": time.time() - start_time
+            "duration_seconds": time.time() - start_time,
         }
 
 
@@ -733,23 +725,21 @@ def main():
         "--db",
         type=Path,
         default=Path("data/processed/twos.db"),
-        help="Path to SQLite database (default: data/processed/twos.db)"
+        help="Path to SQLite database (default: data/processed/twos.db)",
     )
     parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force rebuild (ignore src_hash)"
+        "--force", action="store_true", help="Force rebuild (ignore src_hash)"
     )
     parser.add_argument(
         "--months",
         type=int,
         default=12,
-        help="Number of months of history to build (default: 12)"
+        help="Number of months of history to build (default: 12)",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show what would be built, don't invoke LLM"
+        help="Show what would be built, don't invoke LLM",
     )
 
     args = parser.parse_args()
@@ -765,10 +755,7 @@ def main():
     print()
 
     result = build(
-        db_path=args.db,
-        force=args.force,
-        months=args.months,
-        dry_run=args.dry_run
+        db_path=args.db, force=args.force, months=args.months, dry_run=args.dry_run
     )
 
     if result["success"]:

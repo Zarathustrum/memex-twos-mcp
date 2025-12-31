@@ -38,12 +38,11 @@ Billing Notes:
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal
 
 # ============================================================================
 # Backend Detection
@@ -57,11 +56,7 @@ def check_claude_cli_installed() -> bool:
     Returns:
         True if `claude` executable is found.
     """
-    result = subprocess.run(
-        ["which", "claude"],
-        capture_output=True,
-        text=True
-    )
+    result = subprocess.run(["which", "claude"], capture_output=True, text=True)
     return result.returncode == 0
 
 
@@ -132,24 +127,24 @@ def extract_json_from_response(text: str) -> Dict[str, Any]:
         json.JSONDecodeError: If JSON is malformed
     """
     # Step 1: Strip markdown fences
-    text_clean = re.sub(r'```json\s*', '', text)
-    text_clean = re.sub(r'```\s*$', '', text_clean, flags=re.MULTILINE)
+    text_clean = re.sub(r"```json\s*", "", text)
+    text_clean = re.sub(r"```\s*$", "", text_clean, flags=re.MULTILINE)
 
     # Step 2: Remove comments
-    text_clean = re.sub(r'//.*$', '', text_clean, flags=re.MULTILINE)
-    text_clean = re.sub(r'/\*.*?\*/', '', text_clean, flags=re.DOTALL)
+    text_clean = re.sub(r"//.*$", "", text_clean, flags=re.MULTILINE)
+    text_clean = re.sub(r"/\*.*?\*/", "", text_clean, flags=re.DOTALL)
 
     # Step 3: Find first balanced JSON object
-    start_idx = text_clean.find('{')
+    start_idx = text_clean.find("{")
     if start_idx == -1:
-        raise ValueError(f"No JSON object found in response")
+        raise ValueError("No JSON object found in response")
 
     brace_count = 0
     end_idx = start_idx
     for i, char in enumerate(text_clean[start_idx:], start_idx):
-        if char == '{':
+        if char == "{":
             brace_count += 1
-        elif char == '}':
+        elif char == "}":
             brace_count -= 1
             if brace_count == 0:
                 end_idx = i + 1
@@ -184,7 +179,7 @@ def invoke_claude_cli(
     prompt: str,
     model: str = "sonnet",
     timeout: int = 120,
-    response_format: str = "json"
+    response_format: str = "json",
 ) -> str:
     """
     Invoke Claude Code CLI for LLM processing.
@@ -217,7 +212,7 @@ def invoke_claude_cli(
         subprocess.TimeoutExpired: If timeout exceeded
     """
     # Write prompt to temp file to avoid shell injection
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         prompt_file = Path(f.name)
         f.write(prompt)
 
@@ -228,7 +223,7 @@ def invoke_claude_cli(
             ["bash", "-c", f"cat {prompt_file} | claude --model {model}"],
             capture_output=True,
             text=True,
-            timeout=timeout
+            timeout=timeout,
         )
 
         if result.returncode != 0:
@@ -246,7 +241,7 @@ def invoke_anthropic_api(
     prompt: str,
     model: str = "claude-sonnet-4-5",
     timeout: int = 120,
-    response_format: str = "json"
+    response_format: str = "json",
 ) -> str:
     """
     Invoke Anthropic API directly for LLM processing.
@@ -288,7 +283,7 @@ def invoke_llm(
     response_format: Literal["json", "text", "markdown"] = "json",
     model: str = "sonnet",
     timeout: int = 120,
-    backend: Literal["auto", "claude-cli", "api"] = "auto"
+    backend: Literal["auto", "claude-cli", "api"] = "auto",
 ) -> Dict[str, Any] | str:
     """
     Unified LLM invocation with pluggable backends.
@@ -346,8 +341,9 @@ def invoke_llm(
         except Exception as e:
             # DEBUG: Log raw response on parse failure
             import sys
+
             print(f"\n[ERROR] JSON parsing failed: {e}", file=sys.stderr)
-            print(f"[ERROR] Raw LLM response (first 500 chars):", file=sys.stderr)
+            print("[ERROR] Raw LLM response (first 500 chars):", file=sys.stderr)
             print(raw_response[:500], file=sys.stderr)
             raise
     else:

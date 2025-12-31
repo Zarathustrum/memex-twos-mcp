@@ -364,7 +364,11 @@ def apply_fixes(
             old_parent = thing["parent_task_id"]
             thing["parent_task_id"] = None
             changes.add_modified(
-                thing["id"], "parent_task_id", old_parent, None, "parent_removed_during_grooming"
+                thing["id"],
+                "parent_task_id",
+                old_parent,
+                None,
+                "parent_removed_during_grooming",
             )
 
     return cleaned_things

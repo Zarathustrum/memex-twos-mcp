@@ -20,9 +20,10 @@ import pytest
 
 # Import builder functions
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from build_threads import (
+from build_threads import (  # noqa: E402
     build,
     build_th1_pack,
     build_thread,
@@ -43,7 +44,8 @@ def temp_db():
     cursor = conn.cursor()
 
     # Minimal schema for testing
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE things (
             id TEXT PRIMARY KEY,
             timestamp DATETIME NOT NULL,
@@ -53,16 +55,20 @@ def temp_db():
             is_pending BOOLEAN DEFAULT 0,
             is_strikethrough BOOLEAN DEFAULT 0
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE thing_tags (
             thing_id TEXT,
             tag_id INTEGER,
@@ -70,16 +76,20 @@ def temp_db():
             FOREIGN KEY (thing_id) REFERENCES things(id),
             FOREIGN KEY (tag_id) REFERENCES tags(id)
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE people (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE thing_people (
             thing_id TEXT,
             person_id INTEGER,
@@ -87,9 +97,11 @@ def temp_db():
             FOREIGN KEY (thing_id) REFERENCES things(id),
             FOREIGN KEY (person_id) REFERENCES people(id)
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE threads (
             thread_id TEXT PRIMARY KEY,
             kind TEXT NOT NULL CHECK(kind IN ('tag','person')),
@@ -109,9 +121,11 @@ def temp_db():
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE thread_evidence (
             thread_id TEXT NOT NULL,
             thing_id TEXT NOT NULL,
@@ -121,16 +135,19 @@ def temp_db():
             FOREIGN KEY (thread_id) REFERENCES threads(thread_id) ON DELETE CASCADE,
             FOREIGN KEY (thing_id) REFERENCES things(id) ON DELETE CASCADE
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE VIRTUAL TABLE threads_fts USING fts5(
             thread_id UNINDEXED,
             label,
             kw,
             tokenize='porter unicode61'
         )
-    """)
+    """
+    )
 
     conn.commit()
     conn.close()
@@ -232,7 +249,7 @@ def test_build_th1_pack_format():
         thing_count=150,
         thing_count_90d=25,
         keywords=["budget", "invoice", "meeting"],
-        highlights=highlights
+        highlights=highlights,
     )
 
     # Validate format
@@ -252,12 +269,20 @@ def test_build_th1_pack_format():
 def test_build_th1_pack_regex():
     """Test TH1 pack format with regex."""
     pack = build_th1_pack(
-        "thr:tag:test", "active", "2025-12-30T10:00:00",
-        100, 10, ["test"], [{"id": "task_001", "label": "test", "content": "test"}]
+        "thr:tag:test",
+        "active",
+        "2025-12-30T10:00:00",
+        100,
+        10,
+        ["test"],
+        [{"id": "task_001", "label": "test", "content": "test"}],
     )
 
     # Regex pattern for TH1 format
-    pattern = r"^TH1\|id=thr:(tag|person):[a-z0-9_]+\|st=(active|stale)\|last=\d{4}-\d{2}-\d{2}\|n=\d+\|a90=\d+\|kw=.*\|hi=.*$"
+    pattern = (
+        r"^TH1\|id=thr:(tag|person):[a-z0-9_]+\|st=(active|stale)\|"
+        r"last=\d{4}-\d{2}-\d{2}\|n=\d+\|a90=\d+\|kw=.*\|hi=.*$"
+    )
 
     assert re.match(pattern, pack), f"Pack doesn't match TH1 format: {pack}"
 
@@ -269,9 +294,7 @@ def test_thread_status_active():
 
     highlights = [{"id": "task_001", "label": "test", "content": "test"}]
 
-    pack = build_th1_pack(
-        "thr:tag:work", "active", recent, 100, 15, [], highlights
-    )
+    pack = build_th1_pack("thr:tag:work", "active", recent, 100, 15, [], highlights)
 
     assert "st=active" in pack
 
@@ -280,9 +303,7 @@ def test_thread_status_stale():
     """Test thread status logic: stale when thing_count_90d == 0."""
     old = (datetime.now() - timedelta(days=100)).isoformat()
 
-    pack = build_th1_pack(
-        "thr:tag:work", "stale", old, 100, 0, [], []
-    )
+    pack = build_th1_pack("thr:tag:work", "stale", old, 100, 0, [], [])
 
     assert "st=stale" in pack
 
@@ -302,11 +323,11 @@ def test_build_thread_with_tag(temp_db):
         ts = (now - timedelta(days=i * 20)).isoformat()
         cursor.execute(
             "INSERT INTO things (id, timestamp, content, content_hash) VALUES (?, ?, ?, ?)",
-            (f"task_{i:03d}", ts, f"Work thing {i}", f"hash{i}")
+            (f"task_{i:03d}", ts, f"Work thing {i}", f"hash{i}"),
         )
         cursor.execute(
             "INSERT INTO thing_tags (thing_id, tag_id) VALUES (?, ?)",
-            (f"task_{i:03d}", tag_id)
+            (f"task_{i:03d}", tag_id),
         )
 
     conn.commit()
@@ -347,11 +368,10 @@ def test_build_thread_incremental(temp_db):
 
     cursor.execute(
         "INSERT INTO things (id, timestamp, content, content_hash) VALUES (?, ?, ?, ?)",
-        ("task_001", "2025-12-30 10:00:00", "Test", "hash1")
+        ("task_001", "2025-12-30 10:00:00", "Test", "hash1"),
     )
     cursor.execute(
-        "INSERT INTO thing_tags (thing_id, tag_id) VALUES (?, ?)",
-        ("task_001", tag_id)
+        "INSERT INTO thing_tags (thing_id, tag_id) VALUES (?, ?)", ("task_001", tag_id)
     )
     conn.commit()
 
@@ -385,14 +405,14 @@ def test_build_function(temp_db):
         ts = (now - timedelta(days=i * 10)).isoformat()
         cursor.execute(
             "INSERT INTO things (id, timestamp, content, content_hash) VALUES (?, ?, ?, ?)",
-            (f"task_{i:03d}", ts, f"Thing {i}", f"hash{i}")
+            (f"task_{i:03d}", ts, f"Thing {i}", f"hash{i}"),
         )
 
         # Tag first 5 with 'work', last 5 with 'health'
         tag_id = 1 if i < 5 else 2
         cursor.execute(
             "INSERT INTO thing_tags (thing_id, tag_id) VALUES (?, ?)",
-            (f"task_{i:03d}", tag_id)
+            (f"task_{i:03d}", tag_id),
         )
 
         # Mention Alice in first 3, Bob in last 3
@@ -400,7 +420,7 @@ def test_build_function(temp_db):
         if person_id:
             cursor.execute(
                 "INSERT INTO thing_people (thing_id, person_id) VALUES (?, ?)",
-                (f"task_{i:03d}", person_id)
+                (f"task_{i:03d}", person_id),
             )
 
     conn.commit()
@@ -422,34 +442,53 @@ def test_fts_search(temp_db):
     cursor = conn.cursor()
 
     # Insert thread manually for testing
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO threads (
             thread_id, kind, label, label_norm, start_ts, last_ts,
             thing_count, thing_count_90d, status, archived_at,
             pack_v, pack, kw, src_hash, builder_v
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        "thr:tag:health", "tag", "health", "health",
-        "2025-01-01", "2025-12-30",
-        50, 10, "active", None,
-        1, "TH1|...", "dentist doctor medical",
-        "hash123", "1.0"
-    ))
+    """,
+        (
+            "thr:tag:health",
+            "tag",
+            "health",
+            "health",
+            "2025-01-01",
+            "2025-12-30",
+            50,
+            10,
+            "active",
+            None,
+            1,
+            "TH1|...",
+            "dentist doctor medical",
+            "hash123",
+            "1.0",
+        ),
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO threads_fts (thread_id, label, kw)
         VALUES (?, ?, ?)
-    """, ("thr:tag:health", "health", "dentist doctor medical"))
+    """,
+        ("thr:tag:health", "health", "dentist doctor medical"),
+    )
 
     conn.commit()
 
     # Search using FTS
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT t.*
         FROM threads t
         JOIN threads_fts fts ON t.thread_id = fts.thread_id
         WHERE threads_fts MATCH ?
-    """, ("dentist",))
+    """,
+        ("dentist",),
+    )
 
     results = cursor.fetchall()
 

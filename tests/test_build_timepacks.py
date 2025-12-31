@@ -12,16 +12,17 @@ Covers:
 import re
 import sqlite3
 import tempfile
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
 
 # Import builder functions
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from build_timepacks import (
+from build_timepacks import (  # noqa: E402
     build,
     build_rollup,
     build_tp1_pack,
@@ -46,7 +47,8 @@ def temp_db():
     cursor = conn.cursor()
 
     # Minimal schema for testing
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE things (
             id TEXT PRIMARY KEY,
             timestamp DATETIME NOT NULL,
@@ -56,16 +58,20 @@ def temp_db():
             is_pending BOOLEAN DEFAULT 0,
             is_strikethrough BOOLEAN DEFAULT 0
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE thing_tags (
             thing_id TEXT,
             tag_id INTEGER,
@@ -73,16 +79,20 @@ def temp_db():
             FOREIGN KEY (thing_id) REFERENCES things(id),
             FOREIGN KEY (tag_id) REFERENCES tags(id)
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE people (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE thing_people (
             thing_id TEXT,
             person_id INTEGER,
@@ -90,16 +100,20 @@ def temp_db():
             FOREIGN KEY (thing_id) REFERENCES things(id),
             FOREIGN KEY (person_id) REFERENCES people(id)
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE imports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             imported_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE rollups (
             rollup_id TEXT PRIMARY KEY,
             kind TEXT NOT NULL CHECK(kind IN ('d','w','m')),
@@ -119,9 +133,11 @@ def temp_db():
             updated_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (build_import_id) REFERENCES imports(id)
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE rollup_evidence (
             rollup_id TEXT NOT NULL,
             thing_id TEXT NOT NULL,
@@ -131,7 +147,8 @@ def temp_db():
             FOREIGN KEY (rollup_id) REFERENCES rollups(rollup_id) ON DELETE CASCADE,
             FOREIGN KEY (thing_id) REFERENCES things(id) ON DELETE CASCADE
         )
-    """)
+    """
+    )
 
     conn.commit()
     conn.close()
@@ -313,7 +330,10 @@ def test_tp1_pack_format_regex():
     pack = build_tp1_pack("d", "2025-12-30", "2025-12-30", things, things)
 
     # Regex pattern for TP1 format
-    pattern = r"^TP1\|k=[dwm]\|s=\d{4}-\d{2}-\d{2}\|e=\d{4}-\d{2}-\d{2}\|n=\d+\|cx=\d+\|pn=\d+\|st=\d+\|tg=.*\|pp=.*\|kw=.*\|hi=.*$"
+    pattern = (
+        r"^TP1\|k=[dwm]\|s=\d{4}-\d{2}-\d{2}\|e=\d{4}-\d{2}-\d{2}\|"
+        r"n=\d+\|cx=\d+\|pn=\d+\|st=\d+\|tg=.*\|pp=.*\|kw=.*\|hi=.*$"
+    )
 
     assert re.match(pattern, pack), f"Pack doesn't match TP1 format: {pack}"
 

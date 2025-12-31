@@ -456,7 +456,10 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "rollup_id": {
                         "type": "string",
-                        "description": "Rollup ID: 'd:YYYY-MM-DD' (day), 'w:YYYY-MM-DD' (week Monday), 'm:YYYY-MM' (month)",
+                        "description": (
+                            "Rollup ID: 'd:YYYY-MM-DD' (day), "
+                            "'w:YYYY-MM-DD' (week Monday), 'm:YYYY-MM' (month)"
+                        ),
                     },
                     "include_highlights": {
                         "type": "boolean",
@@ -995,11 +998,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         kind = arguments.get("kind")
         limit = arguments.get("limit", 20)
 
-        results = database.list_threads(
-            status=status,
-            kind=kind,
-            limit=limit
-        )
+        results = database.list_threads(status=status, kind=kind, limit=limit)
 
         return [
             TextContent(type="text", text=json.dumps(results, indent=2, default=str))
@@ -1066,9 +1065,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         highlights = database.get_thread_highlights(thread_id, limit=limit)
 
         return [
-            TextContent(
-                type="text", text=json.dumps(highlights, indent=2, default=str)
-            )
+            TextContent(type="text", text=json.dumps(highlights, indent=2, default=str))
         ]
 
     else:

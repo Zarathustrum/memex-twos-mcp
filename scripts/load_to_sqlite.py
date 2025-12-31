@@ -1095,12 +1095,14 @@ def main():
     # Check if list metadata is present
     has_list_metadata = False
     if tasks and isinstance(tasks[0], dict):
-        has_list_metadata = ("item_type" in tasks[0] or "list_id" in tasks[0])
+        has_list_metadata = "item_type" in tasks[0] or "list_id" in tasks[0]
 
     if not has_list_metadata:
         print("⚠️  WARNING: List metadata not found in JSON!")
         print("   Things will be loaded without item_type and list_id.")
-        print("   💡 Tip: Run scripts/build_list_metadata.py first to add list semantics.")
+        print(
+            "   💡 Tip: Run scripts/build_list_metadata.py first to add list semantics."
+        )
         print()
 
     # Load separate lists metadata file if it exists
@@ -1141,11 +1143,14 @@ def main():
                 # Generate lists metadata from tasks
                 print("ℹ️  Generating lists metadata from embedded task data...")
                 from collections import defaultdict
-                lists_by_id = defaultdict(lambda: {
-                    "items": [],
-                    "item_count": 0,
-                    "substantive_count": 0,
-                })
+
+                lists_by_id = defaultdict(
+                    lambda: {
+                        "items": [],
+                        "item_count": 0,
+                        "substantive_count": 0,
+                    }
+                )
 
                 for task in tasks:
                     list_id = task.get("list_id")
@@ -1163,18 +1168,20 @@ def main():
                     first_item = items[0]
                     section_header = first_item.get("section_header", "Unknown")
 
-                    generated_lists.append({
-                        "list_id": list_id,
-                        "list_type": "unknown",  # Can't infer without build_list_metadata
-                        "list_name": list_id,
-                        "list_name_raw": section_header,
-                        "list_date": None,
-                        "start_line": min(t.get("line_number", 0) for t in items),
-                        "end_line": max(t.get("line_number", 0) for t in items),
-                        "item_count": info["item_count"],
-                        "substantive_count": info["substantive_count"],
-                        "created_at": datetime.now().isoformat(),
-                    })
+                    generated_lists.append(
+                        {
+                            "list_id": list_id,
+                            "list_type": "unknown",  # Can't infer without build_list_metadata
+                            "list_name": list_id,
+                            "list_name_raw": section_header,
+                            "list_date": None,
+                            "start_line": min(t.get("line_number", 0) for t in items),
+                            "end_line": max(t.get("line_number", 0) for t in items),
+                            "item_count": info["item_count"],
+                            "substantive_count": info["substantive_count"],
+                            "created_at": datetime.now().isoformat(),
+                        }
+                    )
 
                 load_lists(conn, generated_lists)
                 load_thing_lists(conn, tasks)

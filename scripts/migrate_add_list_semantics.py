@@ -19,16 +19,16 @@ import argparse
 import re
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Tuple, Optional
+from typing import Optional, Tuple
 from dateutil import parser as dateparser
 
 
 def slugify(text: str) -> str:
     """Convert text to URL-safe slug."""
     text = text.lower()
-    text = re.sub(r'[^\w\s-]', '', text)
-    text = re.sub(r'[-\s]+', '-', text)
-    return text.strip('-')
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[-\s]+", "-", text)
+    return text.strip("-")
 
 
 def parse_date_header(text: str) -> Optional[datetime]:
@@ -43,57 +43,57 @@ def parse_date_header(text: str) -> Optional[datetime]:
 
 def classify_section_header(header: str) -> Tuple[str, str, Optional[str]]:
     """Classify section header as date/topic/metadata."""
-    header_clean = ' '.join(header.split()).strip()
+    header_clean = " ".join(header.split()).strip()
 
     if not header_clean:
-        return ('metadata', 'unknown', None)
+        return ("metadata", "unknown", None)
 
     # Dividers
-    if re.match(r'^[\-=_\*•]{3,}$', header_clean):
-        return ('metadata', 'divider', None)
+    if re.match(r"^[\-=_\*•]{3,}$", header_clean):
+        return ("metadata", "divider", None)
 
     # Try parsing as date
     date_parsed = parse_date_header(header_clean)
     if date_parsed:
         list_date = date_parsed.date().isoformat()
-        return ('date', list_date, list_date)
+        return ("date", list_date, list_date)
 
     # Topic list
-    return ('topic', header_clean, None)
+    return ("topic", header_clean, None)
 
 
 def is_divider(content: str) -> bool:
     """Check if content is a divider line."""
     if not content or len(content) < 3:
         return False
-    return bool(re.match(r'^[\-=_\*•]{3,}$', content.strip()))
+    return bool(re.match(r"^[\-=_\*•]{3,}$", content.strip()))
 
 
 def classify_item_type(content: str) -> str:
     """Classify a thing as content/divider/header/metadata."""
     if not content:
-        return 'metadata'
+        return "metadata"
 
     content = content.strip()
 
     # Dividers
     if is_divider(content):
-        return 'divider'
+        return "divider"
 
     # Headers
-    if len(content) < 50 and (content.isupper() or content.endswith(':')):
-        return 'header'
+    if len(content) < 50 and (content.isupper() or content.endswith(":")):
+        return "header"
 
     # Metadata
-    if content.startswith('[') and content.endswith(']'):
-        return 'metadata'
+    if content.startswith("[") and content.endswith("]"):
+        return "metadata"
 
-    return 'content'
+    return "content"
 
 
 def generate_list_id(list_type: str, list_name: str, start_line: int) -> str:
     """Generate deterministic list_id."""
-    if list_type == 'date':
+    if list_type == "date":
         return f"date_{list_name}"
 
     slug = slugify(list_name)
@@ -110,9 +110,7 @@ def check_migration_needed(conn: sqlite3.Connection) -> Tuple[bool, str]:
     cursor = conn.cursor()
 
     # Check if lists table exists
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='lists'"
-    )
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='lists'")
     if not cursor.fetchone():
         return (True, "lists table missing")
 
@@ -120,13 +118,13 @@ def check_migration_needed(conn: sqlite3.Connection) -> Tuple[bool, str]:
     cursor.execute("PRAGMA table_info(things)")
     columns = {row[1] for row in cursor.fetchall()}
 
-    if 'item_type' not in columns:
+    if "item_type" not in columns:
         return (True, "item_type column missing from things table")
 
-    if 'list_id' not in columns:
+    if "list_id" not in columns:
         return (True, "list_id column missing from things table")
 
-    if 'is_substantive' not in columns:
+    if "is_substantive" not in columns:
         return (True, "is_substantive column missing from things table")
 
     # Check if thing_lists table exists
@@ -149,22 +147,16 @@ def add_new_columns(conn: sqlite3.Connection):
     cursor.execute("PRAGMA table_info(things)")
     existing_columns = {row[1] for row in cursor.fetchall()}
 
-    if 'item_type' not in existing_columns:
-        cursor.execute(
-            "ALTER TABLE things ADD COLUMN item_type TEXT DEFAULT 'content'"
-        )
+    if "item_type" not in existing_columns:
+        cursor.execute("ALTER TABLE things ADD COLUMN item_type TEXT DEFAULT 'content'")
         print("    Added item_type column")
 
-    if 'list_id' not in existing_columns:
-        cursor.execute(
-            "ALTER TABLE things ADD COLUMN list_id TEXT"
-        )
+    if "list_id" not in existing_columns:
+        cursor.execute("ALTER TABLE things ADD COLUMN list_id TEXT")
         print("    Added list_id column")
 
-    if 'is_substantive' not in existing_columns:
-        cursor.execute(
-            "ALTER TABLE things ADD COLUMN is_substantive BOOLEAN DEFAULT 1"
-        )
+    if "is_substantive" not in existing_columns:
+        cursor.execute("ALTER TABLE things ADD COLUMN is_substantive BOOLEAN DEFAULT 1")
         print("    Added is_substantive column")
 
     conn.commit()
@@ -210,24 +202,18 @@ def create_new_tables(conn: sqlite3.Connection):
     )
 
     # Create indexes
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_lists_type ON lists(list_type)"
-    )
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_lists_type ON lists(list_type)")
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_lists_date ON lists(list_date) WHERE list_date IS NOT NULL"
     )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_lists_name ON lists(list_name)"
-    )
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_lists_name ON lists(list_name)")
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_lists_lines ON lists(start_line, end_line)"
     )
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_thing_lists_list ON thing_lists(list_id, position_in_list)"
     )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_things_list_id ON things(list_id)"
-    )
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_things_list_id ON things(list_id)")
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_things_item_type ON things(item_type)"
     )
@@ -272,16 +258,19 @@ def derive_and_backfill_metadata(conn: sqlite3.Connection):
 
     # Group by section_header
     from collections import defaultdict
+
     sections = defaultdict(list)
 
     for row in things:
         thing_id, content, section_header, line_number = row
-        sections[section_header or 'Unknown'].append({
-            'id': thing_id,
-            'content': content,
-            'section_header': section_header,
-            'line_number': line_number,
-        })
+        sections[section_header or "Unknown"].append(
+            {
+                "id": thing_id,
+                "content": content,
+                "section_header": section_header,
+                "line_number": line_number,
+            }
+        )
 
     print(f"    Found {len(sections)} unique sections")
 
@@ -298,18 +287,20 @@ def derive_and_backfill_metadata(conn: sqlite3.Connection):
         list_type, list_name, list_date = classify_section_header(header)
 
         # Boundaries
-        start_line = min(t['line_number'] for t in items if t['line_number'])
-        end_line = max(t['line_number'] for t in items if t['line_number'])
+        start_line = min(t["line_number"] for t in items if t["line_number"])
+        end_line = max(t["line_number"] for t in items if t["line_number"])
 
         # Generate list_id
         list_id = generate_list_id(list_type, list_name, start_line)
 
         # Classify and update each item
         substantive_count = 0
-        for idx, item in enumerate(sorted(items, key=lambda t: t.get('line_number', 0))):
+        for idx, item in enumerate(
+            sorted(items, key=lambda t: t.get("line_number", 0))
+        ):
             # Classify item type
-            item_type = classify_item_type(item['content'])
-            is_substantive = (item_type == 'content' and len(item['content']) > 3)
+            item_type = classify_item_type(item["content"])
+            is_substantive = item_type == "content" and len(item["content"]) > 3
 
             if is_substantive:
                 substantive_count += 1
@@ -321,7 +312,7 @@ def derive_and_backfill_metadata(conn: sqlite3.Connection):
                 SET item_type = ?, list_id = ?, is_substantive = ?
                 WHERE id = ?
             """,
-                (item_type, list_id, is_substantive, item['id'])
+                (item_type, list_id, is_substantive, item["id"]),
             )
             things_updated += 1
 
@@ -331,7 +322,7 @@ def derive_and_backfill_metadata(conn: sqlite3.Connection):
                 INSERT OR IGNORE INTO thing_lists (thing_id, list_id, position_in_list)
                 VALUES (?, ?, ?)
             """,
-                (item['id'], list_id, idx)
+                (item["id"], list_id, idx),
             )
             relationships_created += 1
 
@@ -354,7 +345,7 @@ def derive_and_backfill_metadata(conn: sqlite3.Connection):
                 len(items),
                 substantive_count,
                 datetime.now().isoformat(),
-            )
+            ),
         )
         lists_created += 1
 
@@ -389,7 +380,7 @@ def update_schema_version(conn: sqlite3.Connection):
         INSERT OR REPLACE INTO metadata (key, value)
         VALUES ('list_semantics_migration', ?)
     """,
-        (datetime.now().isoformat(),)
+        (datetime.now().isoformat(),),
     )
 
     conn.commit()
@@ -400,15 +391,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Migrate existing Twos database to add list semantics"
     )
+    parser.add_argument("database", type=Path, help="Path to SQLite database file")
     parser.add_argument(
-        "database",
-        type=Path,
-        help="Path to SQLite database file"
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force migration even if already migrated"
+        "--force", action="store_true", help="Force migration even if already migrated"
     )
 
     args = parser.parse_args()
@@ -449,7 +434,7 @@ def main():
 
         print("\n✅ Migration complete!")
         print(f"   Database: {args.database}")
-        print(f"   Schema version: 1.1 (list semantics enabled)")
+        print("   Schema version: 1.1 (list semantics enabled)")
 
     except Exception as e:
         print(f"\n❌ Migration failed: {e}")
