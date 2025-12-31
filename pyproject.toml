@@ -15,6 +15,7 @@ dependencies = [
     "sentence-transformers>=2.0.0",
     "sqlite-vec>=0.1.0",
     "numpy>=1.24.0",
+    "rich>=13.0.0",
 ]
 
 [project.optional-dependencies]
@@ -30,4 +31,4 @@ dev = [
 ]
 
 [project.scripts]
-memex-twos-mcp = "memex_twos_mcp.server:main"
+memex-twos-mcp = "memex_twos_mcp.server:run"

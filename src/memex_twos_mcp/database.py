@@ -1,9 +1,25 @@
 """
 Database wrapper for Twos SQLite database.
 Provides safe query methods for MCP tools.
+
+Concurrency model:
+- Single persistent SQLite connection per TwosDatabase instance (connection pooling).
+- Thread-safe via threading.Lock() around connection access.
+- check_same_thread=False allows multi-threaded access (required for async MCP server).
+- Queries are NOT concurrent (lock serializes them), but connection overhead is eliminated.
+
+Protocol safety:
+- All print() statements use file=sys.stderr to avoid corrupting MCP stdio protocol.
+- MCP uses JSON-RPC over stdout; any stdout output breaks client communication.
+- This applies to errors, warnings, and debug output.
+
+External dependencies:
+- sqlite_vec (optional): Vector similarity search for semantic queries.
+- sentence-transformers (optional): Embedding generation for hybrid search.
 """
 
 import sqlite3
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -55,14 +71,22 @@ class TwosDatabase:
                 # Initialize vector search extension
                 self._init_vector_search()
         except Exception as e:
-            print(f"⚠️  Embeddings disabled: {e}")
+            print(f"⚠️  Embeddings disabled: {e}", file=sys.stderr)
 
     def _get_connection(self) -> sqlite3.Connection:
         """
         Get a persistent database connection with row factory (connection pooling).
 
-        Returns a single shared connection instead of creating new connections per query.
-        Thread-safe via locking.
+        Thread safety:
+        - Lock acquisition ensures only one thread accesses connection at a time.
+        - check_same_thread=False required because MCP server is async (may use threads).
+        - Without lock, concurrent queries would corrupt SQLite state (not thread-safe).
+        - With lock, queries are serialized (no parallelism, but safe).
+
+        Performance trade-off:
+        - Connection pooling eliminates per-query open/close overhead (~100ms savings).
+        - Serialization via lock means concurrent requests block each other.
+        - For read-heavy workloads, this is acceptable (SQLite locks anyway).
 
         Returns:
             A sqlite3.Connection that yields rows as dict-like objects.
@@ -94,7 +118,7 @@ class TwosDatabase:
     def _init_vector_search(self):
         """Initialize sqlite-vec extension for vector similarity search."""
         if not SQLITE_VEC_AVAILABLE:
-            print("⚠️  sqlite-vec not installed. Vector search unavailable.")
+            print("⚠️  sqlite-vec not installed. Vector search unavailable.", file=sys.stderr)
             self.embeddings_enabled = False
             return
 
@@ -116,7 +140,7 @@ class TwosDatabase:
             )
             conn.commit()
         except Exception as e:
-            print(f"⚠️  Vector search unavailable: {e}")
+            print(f"⚠️  Vector search unavailable: {e}", file=sys.stderr)
             self.embeddings_enabled = False
 
     def query_tasks_by_date(
@@ -724,7 +748,7 @@ class TwosDatabase:
             try:
                 semantic_results = self._vector_search(query, limit=limit * 2)
             except Exception as e:
-                print(f"⚠️  Semantic search failed, falling back to lexical: {e}")
+                print(f"⚠️  Semantic search failed, falling back to lexical: {e}", file=sys.stderr)
                 semantic_results = []
         else:
             semantic_results = []
@@ -803,6 +827,702 @@ class TwosDatabase:
             if thing:
                 # Convert distance to similarity (cosine distance = 1 - similarity)
                 thing["cosine_similarity"] = 1 - distance
+                results.append(thing)
+
+        return results
+
+    # ========================================================================
+    # List-Scoped Queries (Phase 6: List Semantics)
+    # ========================================================================
+
+    def get_list_by_date(
+        self, date: str, include_non_substantive: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all items on the list for a specific date.
+
+        Args:
+            date: ISO date string (YYYY-MM-DD) or 'today'
+            include_non_substantive: Include dividers/headers (default: False)
+
+        Returns:
+            List of thing dictionaries ordered by line_number
+        """
+        if date == "today":
+            from datetime import datetime
+
+            date = datetime.now().date().isoformat()
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Build query
+        query = """
+            SELECT t.*
+            FROM things t
+            WHERE t.list_id = ?
+        """
+        params = [f"date_{date}"]
+
+        if not include_non_substantive:
+            query += " AND t.item_type = 'content'"
+
+        query += " ORDER BY t.line_number"
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results
+
+    def get_list_by_name(
+        self,
+        name: str,
+        list_type: Optional[str] = None,
+        include_non_substantive: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all items on a named list (e.g., 'Tech Projects').
+
+        Args:
+            name: List name (case-insensitive)
+            list_type: Optional filter ('topic', 'date', 'category')
+            include_non_substantive: Include dividers/headers (default: False)
+
+        Returns:
+            List of thing dictionaries ordered by line_number
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Build query
+        query = """
+            SELECT t.*
+            FROM things t
+            JOIN lists l ON t.list_id = l.list_id
+            WHERE LOWER(l.list_name) = LOWER(?)
+        """
+        params = [name]
+
+        if list_type:
+            query += " AND l.list_type = ?"
+            params.append(list_type)
+
+        if not include_non_substantive:
+            query += " AND t.item_type = 'content'"
+
+        query += " ORDER BY t.line_number"
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results
+
+    def get_all_lists(
+        self, list_type: Optional[str] = None, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all lists with summary statistics.
+
+        Args:
+            list_type: Optional filter ('date', 'topic', 'category')
+            limit: Max results (default 50)
+
+        Returns:
+            List of list dictionaries with stats
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        query = """
+            SELECT
+                l.list_id,
+                l.list_type,
+                l.list_name,
+                l.list_name_raw,
+                l.list_date,
+                l.substantive_count AS items,
+                COUNT(CASE WHEN t.is_completed = 0 AND t.item_type = 'content' THEN 1 END) AS open_items,
+                COUNT(CASE WHEN t.is_completed = 1 AND t.item_type = 'content' THEN 1 END) AS completed_items
+            FROM lists l
+            LEFT JOIN things t ON l.list_id = t.list_id
+        """
+        params = []
+
+        if list_type:
+            query += " WHERE l.list_type = ?"
+            params.append(list_type)
+
+        query += """
+            GROUP BY l.list_id
+            ORDER BY l.list_date DESC NULLS LAST, l.list_name
+            LIMIT ?
+        """
+        params.append(limit)
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results
+
+    def get_list_metadata(self, list_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get metadata for a specific list.
+
+        Args:
+            list_id: List identifier
+
+        Returns:
+            List metadata dictionary or None if not found
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM lists WHERE list_id = ?", (list_id,))
+        row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return dict(row)
+
+    def search_within_list(
+        self,
+        query: str,
+        list_id: Optional[str] = None,
+        list_date: Optional[str] = None,
+        list_name: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for items within a specific list.
+
+        Must provide one of: list_id, list_date, or list_name.
+
+        Args:
+            query: Search query (FTS5 syntax)
+            list_id: Exact list ID
+            list_date: ISO date for date-based lists
+            list_name: List name (case-insensitive)
+            limit: Max results
+
+        Returns:
+            List of matching thing dictionaries with relevance scores
+
+        Raises:
+            ValueError: If no list identifier provided or invalid query
+        """
+        if not (list_id or list_date or list_name):
+            raise ValueError(
+                "Must provide one of: list_id, list_date, or list_name"
+            )
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Determine list_id from other parameters if needed
+        target_list_id = list_id
+
+        if not target_list_id and list_date:
+            target_list_id = f"date_{list_date}"
+
+        if not target_list_id and list_name:
+            # Look up list_id from list_name
+            cursor.execute(
+                "SELECT list_id FROM lists WHERE LOWER(list_name) = LOWER(?) LIMIT 1",
+                (list_name,),
+            )
+            row = cursor.fetchone()
+            if row:
+                target_list_id = row[0]
+            else:
+                # List not found
+                return []
+
+        try:
+            # Search within list using FTS
+            cursor.execute(
+                """
+                SELECT t.*,
+                       bm25(things_fts) AS relevance_score,
+                       snippet(things_fts, 1, '<b>', '</b>', '...', 32) AS snippet
+                FROM things t
+                JOIN things_fts fts ON t.id = fts.thing_id
+                WHERE things_fts MATCH ?
+                  AND t.list_id = ?
+                  AND t.item_type = 'content'
+                ORDER BY bm25(things_fts)
+                LIMIT ?
+            """,
+                (query, target_list_id, limit),
+            )
+
+            results = [dict(row) for row in cursor.fetchall()]
+            return results
+
+        except Exception as e:
+            raise ValueError(
+                f"Invalid FTS5 query syntax: {query}. Error: {str(e)}"
+            ) from e
+
+    # ========================================================================
+    # TimePacks: Rollup Queries (Phase 7)
+    # ========================================================================
+
+    def get_rollups(
+        self,
+        kind: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get rollups with optional filtering.
+
+        Args:
+            kind: Filter by kind ('d', 'w', 'm')
+            start_date: Filter by start_date >= value (ISO date)
+            end_date: Filter by start_date <= value (ISO date)
+            limit: Maximum results
+
+        Returns:
+            List of rollup dictionaries
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM rollups WHERE 1=1"
+        params: List[Any] = []
+
+        if kind:
+            query += " AND kind = ?"
+            params.append(kind)
+
+        if start_date:
+            query += " AND start_date >= ?"
+            params.append(start_date)
+
+        if end_date:
+            query += " AND start_date <= ?"
+            params.append(end_date)
+
+        query += " ORDER BY start_date DESC LIMIT ?"
+        params.append(limit)
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results
+
+    def get_rollup(self, rollup_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a single rollup by ID.
+
+        Args:
+            rollup_id: Rollup identifier (e.g., 'd:2025-12-30')
+
+        Returns:
+            Rollup dictionary or None
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM rollups WHERE rollup_id = ?", (rollup_id,))
+        row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return dict(row)
+
+    def get_rollup_highlights(self, rollup_id: str) -> List[Dict[str, Any]]:
+        """
+        Get full thing objects for rollup highlights.
+
+        Args:
+            rollup_id: Rollup identifier
+
+        Returns:
+            List of thing dictionaries (highlights only)
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Fetch highlight thing_ids with rank
+        cursor.execute(
+            """
+            SELECT thing_id, rank
+            FROM rollup_evidence
+            WHERE rollup_id = ? AND role = 'hi'
+            ORDER BY rank
+            """,
+            (rollup_id,)
+        )
+
+        highlight_ids = [(row[0], row[1]) for row in cursor.fetchall()]
+
+        # Fetch full thing objects
+        results = []
+        for thing_id, rank in highlight_ids:
+            thing = self.get_thing_by_id(thing_id)
+            if thing:
+                thing["highlight_rank"] = rank
+                results.append(thing)
+
+        return results
+
+    def search_rollups(
+        self,
+        keyword: str,
+        kind: Optional[str] = None,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Search rollups by keyword (searches kw column).
+
+        Args:
+            keyword: Search keyword
+            kind: Optional kind filter ('d', 'w', 'm')
+            limit: Maximum results
+
+        Returns:
+            List of matching rollup dictionaries
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM rollups WHERE kw LIKE ?"
+        params: List[Any] = [f"%{keyword}%"]
+
+        if kind:
+            query += " AND kind = ?"
+            params.append(kind)
+
+        query += " ORDER BY start_date DESC LIMIT ?"
+        params.append(limit)
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results
+
+    # ========================================================================
+    # MonthlySummaries: LLM-Powered Semantic Framing (Phase 8)
+    # ========================================================================
+
+    def get_month_summary(
+        self,
+        month_id: Optional[str] = None,
+        offset: int = 0
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a monthly summary by ID or offset.
+
+        Args:
+            month_id: Specific month ID (YYYY-MM) or None for current/offset
+            offset: Months back from current (0=current, 1=last month, etc.)
+
+        Returns:
+            Month summary dictionary or None
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        if month_id:
+            # Fetch specific month
+            cursor.execute(
+                "SELECT * FROM month_summaries WHERE month_id = ?",
+                (month_id,)
+            )
+            row = cursor.fetchone()
+
+            if row is None:
+                return None
+
+            result = dict(row)
+
+            # Parse suggested_questions JSON
+            if result.get("suggested_questions"):
+                try:
+                    import json
+                    result["suggested_questions"] = json.loads(result["suggested_questions"])
+                except json.JSONDecodeError:
+                    result["suggested_questions"] = {"questions": []}
+
+            return result
+
+        else:
+            # Fetch by offset
+            cursor.execute(
+                """
+                SELECT * FROM month_summaries
+                ORDER BY start_date DESC
+                LIMIT 1 OFFSET ?
+                """,
+                (offset,)
+            )
+            row = cursor.fetchone()
+
+            if row is None:
+                return None
+
+            result = dict(row)
+
+            # Parse suggested_questions JSON
+            if result.get("suggested_questions"):
+                try:
+                    import json
+                    result["suggested_questions"] = json.loads(result["suggested_questions"])
+                except json.JSONDecodeError:
+                    result["suggested_questions"] = {"questions": []}
+
+            return result
+
+    def list_month_summaries(self, limit: int = 12) -> List[Dict[str, Any]]:
+        """
+        Get list of monthly summaries.
+
+        Args:
+            limit: Maximum results (default 12)
+
+        Returns:
+            List of month summary dictionaries
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT * FROM month_summaries
+            ORDER BY start_date DESC
+            LIMIT ?
+            """,
+            (limit,)
+        )
+
+        results = []
+        for row in cursor.fetchall():
+            result = dict(row)
+
+            # Parse suggested_questions JSON
+            if result.get("suggested_questions"):
+                try:
+                    import json
+                    result["suggested_questions"] = json.loads(result["suggested_questions"])
+                except json.JSONDecodeError:
+                    result["suggested_questions"] = {"questions": []}
+
+            results.append(result)
+
+        return results
+
+    def get_month_summary_highlights(self, month_id: str) -> List[Dict[str, Any]]:
+        """
+        Get full thing objects for month summary highlights.
+
+        Args:
+            month_id: Month identifier (YYYY-MM)
+
+        Returns:
+            List of thing dictionaries (highlights only)
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Fetch highlight thing_ids with rank
+        cursor.execute(
+            """
+            SELECT thing_id, rank
+            FROM month_summary_evidence
+            WHERE month_id = ? AND role = 'hi'
+            ORDER BY rank
+            """,
+            (month_id,)
+        )
+
+        highlight_ids = [(row[0], row[1]) for row in cursor.fetchall()]
+
+        # Fetch full thing objects
+        results = []
+        for thing_id, rank in highlight_ids:
+            thing = self.get_thing_by_id(thing_id)
+            if thing:
+                thing["highlight_rank"] = rank
+                results.append(thing)
+
+        return results
+
+    def get_month_summary_questions(self, month_id: str) -> List[Dict[str, Any]]:
+        """
+        Get suggested questions for a month summary.
+
+        Args:
+            month_id: Month identifier (YYYY-MM)
+
+        Returns:
+            List of question dictionaries
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT suggested_questions FROM month_summaries WHERE month_id = ?",
+            (month_id,)
+        )
+
+        row = cursor.fetchone()
+
+        if row is None or not row[0]:
+            return []
+
+        try:
+            import json
+            questions_data = json.loads(row[0])
+            return questions_data.get("questions", [])
+        except json.JSONDecodeError:
+            return []
+
+    # ========================================================================
+    # ThreadPacks: Active Tag/Person Thread Indices (Phase 9)
+    # ========================================================================
+
+    def list_threads(
+        self,
+        status: str = "active",
+        kind: Optional[str] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        List threads filtered by status and kind.
+
+        Args:
+            status: Filter by status ('active', 'stale', 'archived', or 'all')
+            kind: Filter by kind ('tag', 'person', or None for all)
+            limit: Maximum results
+
+        Returns:
+            List of thread dictionaries
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM threads WHERE 1=1"
+        params: List[Any] = []
+
+        if status != "all":
+            query += " AND status = ?"
+            params.append(status)
+
+        if kind:
+            query += " AND kind = ?"
+            params.append(kind)
+
+        query += " ORDER BY last_ts DESC LIMIT ?"
+        params.append(limit)
+
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        return results
+
+    def search_threads(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Search threads using FTS.
+
+        Args:
+            query: Search query (FTS5 syntax)
+            limit: Maximum results
+
+        Returns:
+            List of matching thread dictionaries
+
+        Raises:
+            ValueError: If FTS5 query syntax is invalid
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            # Search threads_fts and join with threads table
+            cursor.execute(
+                """
+                SELECT t.*,
+                       bm25(threads_fts) AS relevance_score
+                FROM threads t
+                JOIN threads_fts fts ON t.thread_id = fts.thread_id
+                WHERE threads_fts MATCH ?
+                ORDER BY bm25(threads_fts)
+                LIMIT ?
+                """,
+                (query, limit)
+            )
+
+            results = [dict(row) for row in cursor.fetchall()]
+            return results
+
+        except sqlite3.OperationalError as e:
+            raise ValueError(
+                f"Invalid FTS5 query syntax: {query}. Error: {str(e)}"
+            ) from e
+
+    def get_thread(self, thread_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a single thread by ID.
+
+        Args:
+            thread_id: Thread identifier (e.g., 'thr:tag:work')
+
+        Returns:
+            Thread dictionary or None
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM threads WHERE thread_id = ?", (thread_id,))
+        row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return dict(row)
+
+    def get_thread_highlights(
+        self,
+        thread_id: str,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Get full thing objects for thread highlights.
+
+        Args:
+            thread_id: Thread identifier
+            limit: Maximum highlights to return
+
+        Returns:
+            List of thing dictionaries (highlights only)
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Fetch highlight thing_ids with rank
+        cursor.execute(
+            """
+            SELECT thing_id, rank
+            FROM thread_evidence
+            WHERE thread_id = ? AND role = 'hi'
+            ORDER BY rank
+            LIMIT ?
+            """,
+            (thread_id, limit)
+        )
+
+        highlight_ids = [(row[0], row[1]) for row in cursor.fetchall()]
+
+        # Fetch full thing objects
+        results = []
+        for thing_id, rank in highlight_ids:
+            thing = self.get_thing_by_id(thing_id)
+            if thing:
+                thing["highlight_rank"] = rank
                 results.append(thing)
 
         return results

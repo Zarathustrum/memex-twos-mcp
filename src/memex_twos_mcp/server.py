@@ -4,6 +4,18 @@ Memex Twos MCP Server
 
 Model Context Protocol server for querying and analyzing personal task data
 from Twos app exports stored in SQLite.
+
+I/O Boundary: JSON-RPC over stdin/stdout (MCP stdio protocol).
+
+Protocol safety:
+- MCP uses JSON-RPC framing over stdio (newline-delimited JSON messages).
+- Any output to stdout corrupts the protocol and breaks client communication.
+- All logging and warnings MUST go to stderr, never stdout.
+- This includes imports of database.py and other modules.
+
+External dependency:
+- mcp.server.stdio_server: Anthropic's MCP SDK for stdio transport.
+- Expects async main() for server lifecycle management.
 """
 
 import asyncio
@@ -326,6 +338,328 @@ async def list_tools() -> list[Tool]:
                 "required": ["query"],
             },
         ),
+        Tool(
+            name="get_list_by_date",
+            description=(
+                "⭐ Get ALL items on the list for a specific date. "
+                "Use this when user asks 'what's on my list for today/Dec 30/etc?' "
+                "Returns ALL items under that day's section header, not just timestamped items. "
+                "This is the correct tool for 'list' questions about dates."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "ISO date (YYYY-MM-DD) or 'today'",
+                    },
+                    "include_non_substantive": {
+                        "type": "boolean",
+                        "description": "Include dividers/headers (default: false)",
+                        "default": False,
+                    },
+                },
+                "required": ["date"],
+            },
+        ),
+        Tool(
+            name="get_list_by_name",
+            description=(
+                "Get all items on a named topic list (e.g., 'Tech Projects', 'Shopping List'). "
+                "Use this for non-date-based lists."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "List name (case-insensitive)",
+                    },
+                    "list_type": {
+                        "type": "string",
+                        "description": "Optional filter: 'topic', 'date', or 'category'",
+                    },
+                    "include_non_substantive": {
+                        "type": "boolean",
+                        "description": "Include dividers/headers (default: false)",
+                        "default": False,
+                    },
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="list_all_lists",
+            description=(
+                "Get all lists with summary statistics (item counts, completion status). "
+                "Useful for discovering available lists or getting an overview."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "list_type": {
+                        "type": "string",
+                        "description": "Optional filter: 'date', 'topic', or 'category'",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 50)",
+                        "default": 50,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="search_within_list",
+            description=(
+                "Search for items within a specific list. "
+                "Useful for finding specific content on today's list or a topic list. "
+                "Example: 'Find tasks about email on today's list'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (FTS5 syntax)",
+                    },
+                    "list_id": {
+                        "type": "string",
+                        "description": "Exact list ID (optional)",
+                    },
+                    "list_date": {
+                        "type": "string",
+                        "description": "ISO date for date-based lists (optional)",
+                    },
+                    "list_name": {
+                        "type": "string",
+                        "description": "List name (optional, case-insensitive)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 50)",
+                        "default": 50,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="get_timepack",
+            description=(
+                "⭐ Get a TimePack rollup by ID (e.g., 'd:2025-12-30', 'w:2025-12-22', 'm:2025-12'). "
+                "Returns compact summary of things in that time period with highlights, "
+                "tag/people frequencies, and keywords. Perfect for 'what happened last week/month?' queries."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "rollup_id": {
+                        "type": "string",
+                        "description": "Rollup ID: 'd:YYYY-MM-DD' (day), 'w:YYYY-MM-DD' (week Monday), 'm:YYYY-MM' (month)",
+                    },
+                    "include_highlights": {
+                        "type": "boolean",
+                        "description": "Include full thing objects for highlights (default: false)",
+                        "default": False,
+                    },
+                },
+                "required": ["rollup_id"],
+            },
+        ),
+        Tool(
+            name="list_timepacks",
+            description=(
+                "List available TimePacks with optional filtering. "
+                "Use to discover what rollups exist or browse by kind (day/week/month)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "description": "Filter by kind: 'd' (day), 'w' (week), 'm' (month)",
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "Filter by start_date >= value (ISO date)",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "Filter by start_date <= value (ISO date)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 50)",
+                        "default": 50,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="search_timepacks",
+            description=(
+                "Search TimePacks by keyword. Searches the keywords extracted from "
+                "each rollup. Useful for finding time periods related to specific topics."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "keyword": {
+                        "type": "string",
+                        "description": "Search keyword",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Optional filter: 'd', 'w', or 'm'",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 20)",
+                        "default": 20,
+                    },
+                },
+                "required": ["keyword"],
+            },
+        ),
+        Tool(
+            name="get_month_summary",
+            description=(
+                "⭐ Get LLM-powered monthly summary with semantic themes and suggested questions. "
+                "Perfect for 'what happened this month?' queries. Returns themes, highlights, "
+                "and follow-up exploration questions. Can fetch by month ID or offset (0=current, 1=last month)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "month_id": {
+                        "type": "string",
+                        "description": "Specific month ID (YYYY-MM) or None for offset-based",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Months back from current (0=current, 1=last month, default: 0)",
+                        "default": 0,
+                    },
+                    "include_highlights": {
+                        "type": "boolean",
+                        "description": "Include full thing objects for highlights (default: false)",
+                        "default": False,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="list_month_summaries",
+            description=(
+                "List available monthly summaries with metadata. "
+                "Useful for discovering what months have summaries or browsing history."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 12)",
+                        "default": 12,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="list_threads",
+            description=(
+                "⭐ List active tag and person threads. "
+                "Perfect for 'what's active with work?' or 'show me active people' queries. "
+                "Returns threads sorted by most recent activity."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by status: 'active' (default), 'stale', 'archived', or 'all'",
+                        "default": "active",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Filter by kind: 'tag', 'person', or None for all",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 20)",
+                        "default": 20,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="search_threads",
+            description=(
+                "Search threads by keyword using FTS. "
+                "Searches thread labels and keywords. "
+                "Example: 'health', 'alice', 'work planning'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (FTS5 syntax)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 20)",
+                        "default": 20,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="get_thread",
+            description=(
+                "Get detailed information about a specific thread. "
+                "Returns thread metadata with activity stats and highlights."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "thread_id": {
+                        "type": "string",
+                        "description": "Thread ID (e.g., 'thr:tag:work', 'thr:person:alice')",
+                    },
+                    "include_highlights": {
+                        "type": "boolean",
+                        "description": "Include full thing objects for highlights (default: false)",
+                        "default": False,
+                    },
+                },
+                "required": ["thread_id"],
+            },
+        ),
+        Tool(
+            name="get_thread_highlights",
+            description=(
+                "Get recent highlights for a thread. "
+                "Returns the most important recent items for a tag or person."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "thread_id": {
+                        "type": "string",
+                        "description": "Thread ID (e.g., 'thr:tag:work')",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum highlights (default: 10)",
+                        "default": 10,
+                    },
+                },
+                "required": ["thread_id"],
+            },
+        ),
     ]
 
 
@@ -479,6 +813,264 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             TextContent(type="text", text=json.dumps(results, indent=2, default=str))
         ]
 
+    elif name == "get_list_by_date":
+        date = arguments["date"]
+        include_non_substantive = arguments.get("include_non_substantive", False)
+
+        results = database.get_list_by_date(
+            date=date,
+            include_non_substantive=include_non_substantive,
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "get_list_by_name":
+        name_arg = arguments["name"]
+        list_type = arguments.get("list_type")
+        include_non_substantive = arguments.get("include_non_substantive", False)
+
+        results = database.get_list_by_name(
+            name=name_arg,
+            list_type=list_type,
+            include_non_substantive=include_non_substantive,
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "list_all_lists":
+        list_type = arguments.get("list_type")
+        limit = arguments.get("limit", 50)
+
+        results = database.get_all_lists(
+            list_type=list_type,
+            limit=limit,
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "search_within_list":
+        query = arguments["query"]
+        list_id = arguments.get("list_id")
+        list_date = arguments.get("list_date")
+        list_name = arguments.get("list_name")
+        limit = arguments.get("limit", 50)
+
+        try:
+            results = database.search_within_list(
+                query=query,
+                list_id=list_id,
+                list_date=list_date,
+                list_name=list_name,
+                limit=limit,
+            )
+            return [
+                TextContent(
+                    type="text", text=json.dumps(results, indent=2, default=str)
+                )
+            ]
+        except ValueError as e:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Invalid search query or list identifier",
+                            "message": str(e),
+                            "query": query,
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+
+    elif name == "get_timepack":
+        rollup_id = arguments["rollup_id"]
+        include_highlights = arguments.get("include_highlights", False)
+
+        rollup = database.get_rollup(rollup_id)
+
+        if rollup is None:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "TimePack not found",
+                            "rollup_id": rollup_id,
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+
+        # Optionally include full highlight objects
+        if include_highlights:
+            rollup["highlights"] = database.get_rollup_highlights(rollup_id)
+
+        return [
+            TextContent(type="text", text=json.dumps(rollup, indent=2, default=str))
+        ]
+
+    elif name == "list_timepacks":
+        kind = arguments.get("kind")
+        start_date = arguments.get("start_date")
+        end_date = arguments.get("end_date")
+        limit = arguments.get("limit", 50)
+
+        results = database.get_rollups(
+            kind=kind,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "search_timepacks":
+        keyword = arguments["keyword"]
+        kind = arguments.get("kind")
+        limit = arguments.get("limit", 20)
+
+        results = database.search_rollups(
+            keyword=keyword,
+            kind=kind,
+            limit=limit,
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "get_month_summary":
+        month_id = arguments.get("month_id")
+        offset = arguments.get("offset", 0)
+        include_highlights = arguments.get("include_highlights", False)
+
+        summary = database.get_month_summary(month_id=month_id, offset=offset)
+
+        if summary is None:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Monthly summary not found",
+                            "month_id": month_id,
+                            "offset": offset,
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+
+        # Optionally include full highlight objects
+        if include_highlights:
+            summary["highlights"] = database.get_month_summary_highlights(
+                summary["month_id"]
+            )
+
+        return [
+            TextContent(type="text", text=json.dumps(summary, indent=2, default=str))
+        ]
+
+    elif name == "list_month_summaries":
+        limit = arguments.get("limit", 12)
+
+        results = database.list_month_summaries(limit=limit)
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "list_threads":
+        status = arguments.get("status", "active")
+        kind = arguments.get("kind")
+        limit = arguments.get("limit", 20)
+
+        results = database.list_threads(
+            status=status,
+            kind=kind,
+            limit=limit
+        )
+
+        return [
+            TextContent(type="text", text=json.dumps(results, indent=2, default=str))
+        ]
+
+    elif name == "search_threads":
+        query = arguments["query"]
+        limit = arguments.get("limit", 20)
+
+        try:
+            results = database.search_threads(query=query, limit=limit)
+            return [
+                TextContent(
+                    type="text", text=json.dumps(results, indent=2, default=str)
+                )
+            ]
+        except ValueError as e:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Invalid search query",
+                            "message": str(e),
+                            "query": query,
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+
+    elif name == "get_thread":
+        thread_id = arguments["thread_id"]
+        include_highlights = arguments.get("include_highlights", False)
+
+        thread = database.get_thread(thread_id)
+
+        if thread is None:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Thread not found",
+                            "thread_id": thread_id,
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
+
+        # Optionally include full highlight objects
+        if include_highlights:
+            thread["highlights"] = database.get_thread_highlights(thread_id)
+
+        return [
+            TextContent(type="text", text=json.dumps(thread, indent=2, default=str))
+        ]
+
+    elif name == "get_thread_highlights":
+        thread_id = arguments["thread_id"]
+        limit = arguments.get("limit", 10)
+
+        highlights = database.get_thread_highlights(thread_id, limit=limit)
+
+        return [
+            TextContent(
+                type="text", text=json.dumps(highlights, indent=2, default=str)
+            )
+        ]
+
     else:
         raise ValueError(f"Unknown tool: {name}")
 
@@ -533,5 +1125,22 @@ async def main():
             print("Database connection closed.", file=sys.stderr)
 
 
-if __name__ == "__main__":
+def run():
+    """
+    Synchronous entry point for console script.
+
+    Why this wrapper is necessary:
+    - pyproject.toml defines console script: memex-twos-mcp = "memex_twos_mcp.server:run"
+    - setuptools' console_scripts entrypoint expects a regular function, not async.
+    - Calling an async function directly results in "coroutine never awaited" error.
+    - This sync wrapper uses asyncio.run() to execute the async main() properly.
+
+    Without this wrapper:
+    - Users running `memex-twos-mcp` from command line would get runtime errors.
+    - The server would never start, appearing completely broken after `pip install`.
+    """
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run()

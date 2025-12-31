@@ -2,6 +2,23 @@
 """
 Load converted Twos JSON data into SQLite database.
 
+I/O Boundary: Reads JSON from disk, writes to SQLite database file.
+
+This script operates in three modes:
+1. rebuild (default): Delete all data, full reload (use for first import)
+2. append: Insert new items only (use for daily updates, safest)
+3. sync: Insert new, update changed, delete removed (use when export is authoritative)
+
+Mode selection:
+- Rebuild: Always safe, but slow for large datasets
+- Append: Fast incremental, but won't detect changes/deletions
+- Sync: Full incremental, requires stable IDs from convert_to_json.py
+
+Incremental mode relies on:
+- Stable content-hash based IDs (not sequential counters)
+- Matching hash computation in convert_to_json.py
+- Foreign key constraints enabled for CASCADE deletions
+
 This script:
 - Creates the database schema
 - Loads all things
@@ -51,6 +68,14 @@ def create_database(db_path: Path, schema_path: Path):
     """
     Create database and apply schema.
 
+    Irreversible action: Overwrites existing database file at db_path.
+
+    Foreign key enforcement:
+    - SQLite disables foreign keys by default for backwards compatibility.
+    - Without "PRAGMA foreign_keys = ON", CASCADE deletions don't work.
+    - This would leave orphaned rows in junction tables (thing_tags, thing_people, etc).
+    - Must be set per-connection, not per-database.
+
     Args:
         db_path: Path where the SQLite file will be created.
         schema_path: Path to a SQL schema file.
@@ -66,6 +91,11 @@ def create_database(db_path: Path, schema_path: Path):
 
     # I/O boundary: create or overwrite the database file on disk.
     conn = sqlite3.connect(db_path)
+
+    # Enable foreign key constraints (required for proper CASCADE behavior)
+    # Must be set before schema creation for best compatibility
+    conn.execute("PRAGMA foreign_keys = ON")
+
     conn.executescript(schema_sql)
     conn.commit()
 
@@ -100,8 +130,8 @@ def load_tasks(conn: sqlite3.Connection, tasks: list) -> None:
                 id, timestamp, timestamp_raw, content, content_raw, content_hash,
                 section_header, section_date, line_number, indent_level,
                 parent_task_id, bullet_type, is_completed, is_pending,
-                is_strikethrough
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                is_strikethrough, item_type, list_id, is_substantive
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 task["id"],
@@ -119,6 +149,9 @@ def load_tasks(conn: sqlite3.Connection, tasks: list) -> None:
                 task.get("is_completed", False),
                 task.get("is_pending", False),
                 task.get("is_strikethrough", False),
+                task.get("item_type", "content"),
+                task.get("list_id"),
+                task.get("is_substantive", True),
             ),
         )
 
@@ -288,6 +321,95 @@ def load_links(conn: sqlite3.Connection, tasks: list):
 
     conn.commit()
     print(f"Loaded {link_count} links")
+
+
+def load_lists(conn: sqlite3.Connection, lists_metadata: list):
+    """
+    Load lists metadata into the lists table.
+
+    Args:
+        conn: Open SQLite connection.
+        lists_metadata: List of list dictionaries.
+
+    Returns:
+        None.
+    """
+    if not lists_metadata:
+        print("No lists metadata to load")
+        return
+
+    print(f"Loading {len(lists_metadata)} lists...")
+
+    cursor = conn.cursor()
+
+    for list_entry in lists_metadata:
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO lists (
+                list_id, list_type, list_name, list_name_raw, list_date,
+                start_line, end_line, item_count, substantive_count, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                list_entry["list_id"],
+                list_entry["list_type"],
+                list_entry["list_name"],
+                list_entry["list_name_raw"],
+                list_entry.get("list_date"),
+                list_entry["start_line"],
+                list_entry["end_line"],
+                list_entry.get("item_count", 0),
+                list_entry.get("substantive_count", 0),
+                list_entry.get("created_at", datetime.now().isoformat()),
+            ),
+        )
+
+    conn.commit()
+    print(f"Loaded {len(lists_metadata)} lists")
+
+
+def load_thing_lists(conn: sqlite3.Connection, tasks: list):
+    """
+    Load thing-list relationships into the thing_lists junction table.
+
+    Args:
+        conn: Open SQLite connection.
+        tasks: List of thing dictionaries with list_id assigned.
+
+    Returns:
+        None.
+    """
+    print("Loading thing-list relationships...")
+
+    cursor = conn.cursor()
+
+    # Group tasks by list_id to assign positions
+    list_items = {}
+    for task in tasks:
+        list_id = task.get("list_id")
+        if list_id:
+            if list_id not in list_items:
+                list_items[list_id] = []
+            list_items[list_id].append(task)
+
+    # Insert relationships with positions
+    relationship_count = 0
+    for list_id, items in list_items.items():
+        # Sort by line_number within list
+        items_sorted = sorted(items, key=lambda t: t.get("line_number", 0))
+
+        for position, task in enumerate(items_sorted):
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO thing_lists (thing_id, list_id, position_in_list)
+                VALUES (?, ?, ?)
+            """,
+                (task["id"], list_id, position),
+            )
+            relationship_count += 1
+
+    conn.commit()
+    print(f"Created {relationship_count} thing-list relationships")
 
 
 def update_metadata(
@@ -466,7 +588,7 @@ def generate_embeddings(
 
 
 def _insert_thing(cursor, task):
-    """Insert single thing with all fields including content_hash."""
+    """Insert single thing with all fields including content_hash and list metadata."""
     content_hash = compute_content_hash(task)
 
     cursor.execute(
@@ -475,8 +597,9 @@ def _insert_thing(cursor, task):
             id, timestamp, content, content_hash,
             timestamp_raw, content_raw, section_header, section_date,
             line_number, indent_level, parent_task_id, bullet_type,
-            is_completed, is_pending, is_strikethrough
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            is_completed, is_pending, is_strikethrough,
+            item_type, list_id, is_substantive
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
         (
             task["id"],
@@ -494,6 +617,9 @@ def _insert_thing(cursor, task):
             task.get("is_completed", False),
             task.get("is_pending", False),
             task.get("is_strikethrough", False),
+            task.get("item_type", "content"),
+            task.get("list_id"),
+            task.get("is_substantive", True),
         ),
     )
 
@@ -966,6 +1092,31 @@ def main():
 
     print(f"Found {len(tasks)} things")
 
+    # Check if list metadata is present
+    has_list_metadata = False
+    if tasks and isinstance(tasks[0], dict):
+        has_list_metadata = ("item_type" in tasks[0] or "list_id" in tasks[0])
+
+    if not has_list_metadata:
+        print("⚠️  WARNING: List metadata not found in JSON!")
+        print("   Things will be loaded without item_type and list_id.")
+        print("   💡 Tip: Run scripts/build_list_metadata.py first to add list semantics.")
+        print()
+
+    # Load separate lists metadata file if it exists
+    lists_metadata = []
+    lists_file = args.json_file.parent / "lists_metadata.json"
+    if lists_file.exists():
+        print(f"Loading lists metadata from {lists_file}...")
+        with open(lists_file, "r", encoding="utf-8") as f:
+            lists_metadata = json.load(f)
+        print(f"  Loaded {len(lists_metadata)} lists")
+    elif has_list_metadata:
+        # Extract from enhanced tasks metadata
+        if isinstance(data, dict) and "lists_metadata" in data:
+            lists_metadata = data["lists_metadata"]
+            print(f"  Found {len(lists_metadata)} lists in JSON metadata")
+
     # Choose loading strategy based on mode
     if args.mode == "rebuild" or not db_exists:
         # Full rebuild (delete and recreate)
@@ -980,6 +1131,53 @@ def main():
             load_people(conn, tasks)
             load_tags(conn, tasks)
             load_links(conn, tasks)
+
+            # Load list metadata and relationships
+            if lists_metadata:
+                load_lists(conn, lists_metadata)
+                load_thing_lists(conn, tasks)
+            elif has_list_metadata:
+                # List metadata embedded in tasks but no separate lists file
+                # Generate lists metadata from tasks
+                print("ℹ️  Generating lists metadata from embedded task data...")
+                from collections import defaultdict
+                lists_by_id = defaultdict(lambda: {
+                    "items": [],
+                    "item_count": 0,
+                    "substantive_count": 0,
+                })
+
+                for task in tasks:
+                    list_id = task.get("list_id")
+                    if list_id:
+                        lists_by_id[list_id]["items"].append(task)
+                        lists_by_id[list_id]["item_count"] += 1
+                        if task.get("is_substantive", True):
+                            lists_by_id[list_id]["substantive_count"] += 1
+
+                # Create lists entries (minimal metadata)
+                generated_lists = []
+                for list_id, info in lists_by_id.items():
+                    items = info["items"]
+                    # Extract metadata from first item
+                    first_item = items[0]
+                    section_header = first_item.get("section_header", "Unknown")
+
+                    generated_lists.append({
+                        "list_id": list_id,
+                        "list_type": "unknown",  # Can't infer without build_list_metadata
+                        "list_name": list_id,
+                        "list_name_raw": section_header,
+                        "list_date": None,
+                        "start_line": min(t.get("line_number", 0) for t in items),
+                        "end_line": max(t.get("line_number", 0) for t in items),
+                        "item_count": info["item_count"],
+                        "substantive_count": info["substantive_count"],
+                        "created_at": datetime.now().isoformat(),
+                    })
+
+                load_lists(conn, generated_lists)
+                load_thing_lists(conn, tasks)
 
             # Generate embeddings for semantic search
             generate_embeddings(conn, tasks)
@@ -1005,6 +1203,12 @@ def main():
     else:
         # Incremental mode (sync or append)
         conn = sqlite3.connect(args.output)
+
+        # Enable foreign key constraints (required for proper CASCADE behavior)
+        # Critical in sync mode: when things are deleted, CASCADE ensures
+        # junction table rows (thing_tags, thing_people, etc) are also deleted.
+        # Without this, orphaned rows accumulate silently.
+        conn.execute("PRAGMA foreign_keys = ON")
 
         try:
             stats = incremental_load(
