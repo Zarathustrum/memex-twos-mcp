@@ -171,7 +171,11 @@ def build_llm_prompt(
 
     candidates_text = "\n".join(candidate_lines)
 
-    prompt = f"""You are analyzing a month of personal data for contextual framing.
+    prompt = f"""SYSTEM / ROLE
+You are a deterministic JSON generator. You must return ONLY valid JSON that matches the schema exactly. No markdown, no commentary, no extra keys, no trailing commas.
+
+TASK CONTEXT
+You are analyzing a month of personal "things" (tasks/journal/list items) for contextual framing.
 
 Month: {month_id}
 Date range: {start_date} to {end_date}
@@ -183,40 +187,72 @@ Top people: {people_summary}
 Candidate highlights (top 30 by relevance):
 {candidates_text}
 
-Your task:
-1. Identify 3-8 semantic themes (clusters of related activity)
-   - Each theme must be grounded to at least 2 thing IDs from candidates above
-   - Theme names: snake_case, <=32 chars, descriptive (e.g., "work_planning", "home_maintenance")
+ABSOLUTE RULES (MUST FOLLOW)
+A) You may ONLY use thing_ids that appear in the candidate list above.
+   - Never invent, modify, or partially copy IDs.
+   - If unsure, do not use the ID.
+B) Output must be valid JSON and NOTHING ELSE (no surrounding text).
+C) Output must have EXACTLY these top-level keys: "themes", "highlights", "questions".
+   - No additional top-level keys.
+D) Counts MUST be within required ranges:
+   - themes: 3–8 objects
+   - highlights: 10–12 objects
+   - questions: 3–5 objects
+E) Naming rules:
+   - theme.name must match: ^[a-z_]{{1,32}}$
+   - highlight.label must match: ^[a-z0-9_]{{1,32}}$
+F) Anchoring rules:
+   - Each theme must include >=2 thing_ids (all from candidates).
+   - Each question.anchors must contain only candidate IDs (2–4 recommended).
+G) Question text rules:
+   - question.text must be <= 100 characters (count characters strictly).
+H) JSON formatting rules:
+   - Use double quotes for all strings.
+   - Escape internal quotes properly.
+   - No trailing commas anywhere.
 
-2. Select 10-12 best highlights that represent the month
-   - Must be from candidate list only (use exact thing IDs shown above)
-   - Prefer: recency, diversity of themes, substantive content
-   - Generate a short label for each highlight (snake_case, <=32 chars)
+WHAT TO PRODUCE
+1) THEMES (3–8)
+- Identify semantic clusters present in the candidate items (projects, areas of life, recurring topics).
+- Each theme MUST reference at least 2 candidate thing_ids that clearly belong together.
+- Theme name: concise snake_case, <=32 chars, descriptive.
 
-3. Suggest 3-5 follow-up questions for exploration
-   - Focus on: progress, changes, patterns, unresolved items
-   - Anchor each question to specific thing IDs from the candidates
-   - Keep questions <100 chars
-   - Provide a thread_id suggestion (format: "thr:tag:TAG" or "thr:person:NAME")
+2) HIGHLIGHTS (10–12)
+- Choose the 10–12 best representative items from the candidate list ONLY.
+- Prefer: substantive content, diversity across themes, and recency.
+- For each, generate a short label (snake_case, <=32 chars, may include digits).
+- Each highlight.thing_id must be unique (do not repeat the same item).
 
-CRITICAL: All thing_ids in your response MUST be from the candidate list above. Do not hallucinate IDs.
+3) QUESTIONS (3–5)
+- Suggest follow-up questions that help explore progress, changes, patterns, or unresolved items.
+- Each question must be anchored to specific candidate IDs (anchors array).
+- Provide thread_id when it clearly fits:
+  - "thr:tag:TAG" where TAG is one of the top tags (exact spelling from Top tags if possible)
+  - OR "thr:person:NAME" where NAME is one of the top people (exact spelling from Top people if possible)
+- rationale is optional; if included, keep it short (<= ~80 chars) and do NOT include extra IDs outside anchors.
 
-Return ONLY valid JSON (no markdown, no explanation):
+SELF-CHECK BEFORE YOU OUTPUT (DO THIS SILENTLY)
+- Verify you have exactly 3 top-level keys.
+- Verify counts: themes 3–8, highlights 10–12, questions 3–5.
+- Verify every referenced thing_id appears verbatim in the candidate list.
+- Verify theme.name and highlight.label regex compliance and <=32 chars.
+- Verify question.text <=100 chars.
+- Verify JSON parses (no trailing commas, no stray characters).
+
+OUTPUT SCHEMA (RETURN EXACTLY THIS SHAPE)
 {{
   "themes": [
-    {{"name": "work_planning", "thing_ids": ["task_08190", "task_08155"]}},
-    {{"name": "health_care", "thing_ids": ["task_08123", "task_08001"]}}
+    {{"name": "snake_case_name", "thing_ids": ["task_00001", "task_00002"]}}
   ],
   "highlights": [
-    {{"thing_id": "task_08190", "label": "q4_review"}},
-    {{"thing_id": "task_08123", "label": "dentist_appt"}}
+    {{"thing_id": "task_00001", "label": "short_label_1"}}
   ],
   "questions": [
     {{
-      "text": "What progress on Q4 planning?",
-      "anchors": ["task_08190", "task_08155"],
+      "text": "A question under 100 chars?",
+      "anchors": ["task_00001", "task_00002"],
       "thread_id": "thr:tag:work",
-      "rationale": "High activity in work thread"
+      "rationale": "Optional brief rationale"
     }}
   ]
 }}"""
@@ -458,6 +494,14 @@ def build_month_summary(
     except Exception as e:
         error_msg = f"LLM invocation failed: {str(e)}"
         print(f"FAIL ({error_msg})")
+
+        # DEBUG: Save prompt for inspection
+        debug_dir = Path("debug")
+        debug_dir.mkdir(exist_ok=True)
+        debug_file = debug_dir / f"llm_fail_{month_id}_prompt.txt"
+        debug_file.write_text(prompt)
+        print(f"       Debug prompt saved to: {debug_file}")
+
         return False, error_msg
 
     # Validate response

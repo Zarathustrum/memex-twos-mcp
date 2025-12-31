@@ -115,10 +115,11 @@ def extract_json_from_response(text: str) -> Dict[str, Any]:
     """
     Extract JSON from LLM response text.
 
-    Handles multiple formats:
+    Handles:
     - Markdown code blocks: ```json { ... } ```
     - Raw JSON objects: { ... }
-    - Lenient whitespace handling
+    - Removes C-style comments (// and /* */)
+    - Extracts first balanced brace pair
 
     Args:
         text: Raw LLM response text
@@ -127,22 +128,51 @@ def extract_json_from_response(text: str) -> Dict[str, Any]:
         Parsed JSON as dictionary
 
     Raises:
-        ValueError: If no valid JSON found
+        ValueError: If no valid JSON found or braces unbalanced
         json.JSONDecodeError: If JSON is malformed
     """
-    # Try markdown code block first
-    json_match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
-    if json_match:
-        json_str = json_match.group(1)
-    else:
-        # Try raw JSON
-        json_match = re.search(r'\{.*\}', text, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(0)
-        else:
-            raise ValueError(f"No JSON found in response: {text[:500]}")
+    # Step 1: Strip markdown fences
+    text_clean = re.sub(r'```json\s*', '', text)
+    text_clean = re.sub(r'```\s*$', '', text_clean, flags=re.MULTILINE)
 
-    return json.loads(json_str)
+    # Step 2: Remove comments
+    text_clean = re.sub(r'//.*$', '', text_clean, flags=re.MULTILINE)
+    text_clean = re.sub(r'/\*.*?\*/', '', text_clean, flags=re.DOTALL)
+
+    # Step 3: Find first balanced JSON object
+    start_idx = text_clean.find('{')
+    if start_idx == -1:
+        raise ValueError(f"No JSON object found in response")
+
+    brace_count = 0
+    end_idx = start_idx
+    for i, char in enumerate(text_clean[start_idx:], start_idx):
+        if char == '{':
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                end_idx = i + 1
+                break
+
+    if brace_count != 0:
+        raise ValueError(f"Unbalanced braces in JSON (count: {brace_count})")
+
+    json_str = text_clean[start_idx:end_idx].strip()
+
+    # Step 4: Parse
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError as e:
+        # Enhanced error reporting
+        problem_start = max(0, e.pos - 50)
+        problem_end = min(len(json_str), e.pos + 50)
+        context = json_str[problem_start:problem_end]
+
+        raise ValueError(
+            f"Invalid JSON at line {e.lineno}, col {e.colno}: {e.msg}\n"
+            f"Context: ...{context}..."
+        )
 
 
 # ============================================================================
@@ -311,7 +341,15 @@ def invoke_llm(
 
     # Parse response based on format
     if response_format == "json":
-        return extract_json_from_response(raw_response)
+        try:
+            return extract_json_from_response(raw_response)
+        except Exception as e:
+            # DEBUG: Log raw response on parse failure
+            import sys
+            print(f"\n[ERROR] JSON parsing failed: {e}", file=sys.stderr)
+            print(f"[ERROR] Raw LLM response (first 500 chars):", file=sys.stderr)
+            print(raw_response[:500], file=sys.stderr)
+            raise
     else:
         return raw_response
 
