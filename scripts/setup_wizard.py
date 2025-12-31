@@ -355,7 +355,7 @@ def collect_configuration(
         if config.run_grooming:
             config.run_ai_analysis = prompt_yes_no(
                 renderer,
-                "Run AI semantic analysis (uses Claude Code subscription)?",
+                "Run AI semantic analysis (Developer/uses Claude Code subscription)?",
                 default=False,
             )
 
@@ -965,6 +965,71 @@ def stage_testing(renderer: ConsoleRenderer, config: WizardConfig) -> StageResul
 
 
 # ============================================================================
+# Stage Selection (Jump Mode)
+# ============================================================================
+
+
+def prompt_stage_selection(renderer: ConsoleRenderer, stages: list) -> int:
+    """
+    Display numbered stage list and prompt user to select which stage to jump to.
+
+    Args:
+        renderer: Console renderer for output
+        stages: List of (stage_name, stage_func) tuples
+
+    Returns:
+        Index of selected stage (0-based)
+    """
+    # Build stage display list with human-readable names
+    stage_names = {
+        "environment_check": "Environment Check",
+        "virtual_environment": "Virtual Environment",
+        "dependencies": "Dependencies",
+        "data_ingest": "Data Ingest",
+        "conversion": "Conversion (MD → JSON)",
+        "grooming": "Grooming (optional)",
+        "entity_classification": "Entity Classification (optional)",
+        "sqlite_load": "SQLite Load",
+        "embeddings": "Embeddings",
+        "derived_indices": "Derived Indices (optional)",
+        "validation": "Validation",
+        "mcp_config": "MCP Configuration (optional)",
+        "testing": "Testing",
+    }
+
+    print("\n" + "=" * 70)
+    print("  PIPELINE STAGES - Select stage to jump to:")
+    print("=" * 70)
+    print()
+
+    for i, (stage_key, _) in enumerate(stages, 1):
+        display_name = stage_names.get(stage_key, stage_key)
+        print(f"  {i:2d}. {display_name}")
+
+    print()
+    print("=" * 70)
+    print()
+
+    while True:
+        try:
+            choice = input(f"Jump to stage (1-{len(stages)}) [1]: ").strip()
+
+            if not choice:
+                return 0  # Default to first stage
+
+            stage_num = int(choice)
+            if 1 <= stage_num <= len(stages):
+                return stage_num - 1  # Convert to 0-based index
+            else:
+                print(f"Invalid choice. Please enter a number between 1 and {len(stages)}.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+        except KeyboardInterrupt:
+            print("\n\nCancelled by user")
+            sys.exit(0)
+
+
+# ============================================================================
 # Main Execution
 # ============================================================================
 
@@ -989,6 +1054,10 @@ Examples:
   # CI/CD mode (minimal, no AI features)
   python scripts/setup_wizard.py --yes --no-color --skip-ai-analysis \\
       --skip-classify-entities --export-file export.md
+
+  # Jump to specific stage (for testing/debugging)
+  python scripts/setup_wizard.py --jump
+  # Shows numbered stage list, then prompts for selection (e.g., "10" for derived indices)
         """,
     )
 
@@ -1060,7 +1129,7 @@ Examples:
         "--ai-analysis",
         action="store_true",
         default=False,
-        help="Run AI semantic analysis (uses Claude Code subscription)",
+        help="Run AI semantic analysis (Developer/uses Claude Code subscription)",
     )
     parser.add_argument(
         "--skip-ai-analysis",
@@ -1109,6 +1178,13 @@ Examples:
         help="Skip MCP configuration generation",
     )
 
+    # Stage jumping (for testing/debugging)
+    parser.add_argument(
+        "--jump",
+        action="store_true",
+        help="Jump to a specific pipeline stage (shows numbered list for selection)",
+    )
+
     args = parser.parse_args()
 
     # Check if Rich is available but not if --no-color
@@ -1138,11 +1214,7 @@ Examples:
         print("=" * 70 + "\n")
 
     try:
-        # Stage 1: Collect configuration
-        config = collect_configuration(renderer, args)
-        renderer = ConsoleRenderer(config)  # Recreate with actual config
-
-        # Execute stages
+        # Define all pipeline stages
         stages = [
             ("environment_check", stage_check_python),
             ("virtual_environment", stage_setup_venv),
@@ -1159,8 +1231,40 @@ Examples:
             ("testing", stage_testing),
         ]
 
+        # Handle jump mode
+        start_index = 0
+        if args.jump:
+            start_index = prompt_stage_selection(renderer, stages)
+            print(f"\n✓ Jumping to stage {start_index + 1}: {stages[start_index][0]}")
+            print(f"  Skipping stages 1-{start_index}\n")
+
+        # Stage 1: Collect configuration (unless jumping past it)
+        if start_index == 0:
+            config = collect_configuration(renderer, args)
+            renderer = ConsoleRenderer(config)  # Recreate with actual config
+        else:
+            # Jumping mode: use non-interactive config from CLI args
+            config = WizardConfig(
+                non_interactive=True,
+                verbose=args.verbose,
+                no_color=args.no_color,
+                export_file=args.export_file,
+                claude_config_path=args.claude_config,
+                install_deps=args.install_deps,
+                run_grooming=args.groom,
+                run_ai_analysis=args.ai_analysis,
+                run_entity_classification=args.classify_entities,
+                overwrite_db=args.overwrite_db,
+                build_derived_indices=True,  # Default to true for jump mode
+                build_with_llm=False,  # Default to false (can override with future flag)
+                generate_mcp_config=args.generate_mcp_config,
+            )
+            renderer = ConsoleRenderer(config)
+            print("  Using non-interactive mode with CLI defaults for jumped execution\n")
+
+        # Execute stages starting from selected index
         failed = False
-        for stage_name, stage_func in stages:
+        for stage_name, stage_func in stages[start_index:]:
             result = stage_func(renderer, config)
             config.stage_results[stage_name] = result
 
