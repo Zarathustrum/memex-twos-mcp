@@ -1,0 +1,41 @@
+# LLM Configuration Example for memex-twos-mcp
+#
+# Copy this file to .llm_config.yaml and customize for your setup.
+#
+# This file configures which LLM provider to use for AI-powered features
+# like data grooming, entity classification, and monthly summaries.
+
+# Default provider to use (required)
+# Options: lmstudio, claude-cli, anthropic-api
+default_provider: lmstudio
+
+# Provider-specific configurations
+providers:
+  # LM Studio - Local AI server (free, private)
+  # Download from: https://lmstudio.ai/
+  # Start local server on port 1234 (default) or custom port
+  lmstudio:
+    endpoint: http://localhost:1234
+    # For remote LM Studio server:
+    # endpoint: http://192.168.1.100:1234
+
+  # Claude CLI - Uses your Claude subscription (subscription quota)
+  # Install from: https://code.claude.com/docs/en/quickstart
+  # No additional configuration needed
+  # claude-cli:
+  #   # Uses installed `claude` command
+
+  # Anthropic API - Direct API access (pay-per-token)
+  # Get API key from: https://console.anthropic.com/
+  # anthropic-api:
+  #   api_key: sk-ant-api03-...
+  #   # Optional: specify default model
+  #   # default_model: claude-sonnet-4.5-20250929
+
+# Usage:
+# 1. Copy this file: cp .llm_config.yaml.example .llm_config.yaml
+# 2. Edit .llm_config.yaml with your provider settings
+# 3. The config file is gitignored, so your API keys stay private
+#
+# You can also specify a custom config file:
+#   python3 scripts/groom_data.py --llm-config /path/to/config.yaml

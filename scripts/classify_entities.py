@@ -27,28 +27,28 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Import shared LLM utilities
 sys.path.insert(0, str(Path(__file__).parent))
 try:
-    from llm_utils import check_claude_cli_installed
+    from llm_utils import invoke_llm, check_llm_available
 except ImportError as e:
     print(f"ERROR: Could not import llm_utils: {e}", file=sys.stderr)
     sys.exit(1)
 
 
-def check_claude_code() -> bool:
+def check_claude_code(config_path: Optional[Path] = None) -> bool:
     """
-    Check if Claude Code CLI is installed.
+    Check if any LLM provider is available.
 
-    NOTE: This is a compatibility wrapper. New code should use
-    llm_utils.check_claude_cli_installed() directly.
+    Args:
+        config_path: Optional path to YAML config file
 
     Returns:
-        True if the `claude` executable is on PATH.
+        True if an LLM provider (LM Studio, Claude CLI, Anthropic API, etc.) is available.
     """
-    return check_claude_cli_installed()
+    return check_llm_available(config_path=config_path)
 
 
 def load_json_data(json_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
@@ -81,6 +81,43 @@ def load_json_data(json_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any
 
     print(f"✅ Loaded {len(things)} things")
     return things, metadata
+
+
+def filter_things_by_months(
+    things: List[Dict[str, Any]], months_back: int
+) -> List[Dict[str, Any]]:
+    """
+    Filter things to keep only items within the last N months.
+
+    Notes:
+        - Uses calendar-aware month subtraction for accurate boundaries.
+        - Items without parseable timestamps are kept to avoid accidental loss.
+    """
+    if months_back <= 0:
+        return things
+
+    from dateutil import parser
+    from dateutil.relativedelta import relativedelta
+
+    cutoff_date = datetime.now() - relativedelta(months=months_back)
+    filtered = []
+
+    for thing in things:
+        timestamp = thing.get("timestamp")
+        if not timestamp:
+            filtered.append(thing)
+            continue
+
+        try:
+            ts = parser.parse(timestamp)
+        except Exception:
+            filtered.append(thing)
+            continue
+
+        if ts >= cutoff_date:
+            filtered.append(thing)
+
+    return filtered
 
 
 def extract_entities(things: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -231,7 +268,7 @@ def generate_entity_summary(entities: Dict[str, Any], limit: int = 50) -> str:
 
 
 def invoke_claude_classification(
-    entities: Dict[str, Any], output_path: Path, timeout_seconds: int = 900
+    entities: Dict[str, Any], output_path: Path, timeout_seconds: int = 900, config_path: Optional[Path] = None
 ) -> bool:
     """
     Invoke Claude Code to classify entities and generate mapping file.
@@ -272,8 +309,6 @@ YOUR TASK:
 
 2. For people with case variants, suggest a canonical form
 
-3. Write a JSON mapping file to: {output_path}
-
 ## People to Classify (top 200 by frequency)
 
 {json.dumps(people_list, indent=2)}
@@ -282,9 +317,9 @@ YOUR TASK:
 
 {json.dumps(tags_list, indent=2)}
 
-## Output Format
+## Required Output Format
 
-Write a JSON file with this structure:
+Return ONLY valid JSON with this exact structure (no explanatory text before or after):
 
 ```json
 {{
@@ -312,50 +347,31 @@ Write a JSON file with this structure:
 }}
 ```
 
-Focus on accuracy. When in doubt, mark as "other" rather than guessing.
-
-Execute this task now without asking for confirmation. Write the complete mapping file.
+IMPORTANT: Return ONLY the JSON object shown above. Do not include any explanatory text, markdown formatting, or commentary. Focus on accuracy - when in doubt, mark as "other" rather than guessing.
 """
 
-    # Invoke Claude Code CLI
+    # Invoke LLM with JSON parsing
     try:
-        result = subprocess.run(
-            [
-                "claude",
-                "--print",
-                "--tools",
-                "Write",
-                "--allowedTools",
-                "Write",
-                "--dangerously-skip-permissions",
-                "--no-session-persistence",
-                prompt,
-            ],
-            capture_output=True,
-            text=True,
+        llm_response = invoke_llm(
+            prompt=prompt,
+            response_format="json",
             timeout=timeout_seconds,
-            stdin=subprocess.DEVNULL,  # Signal no input coming
+            max_tokens=8192,  # Large enough for ~1600 entities
+            config_path=config_path,
         )
-    except subprocess.TimeoutExpired:
-        print(
-            f"❌ Claude Code timed out after {timeout_seconds} seconds ({timeout_seconds//60} minutes)"
-        )
-        print(f"   💡 Tip: Increase timeout with --ai-timeout {timeout_seconds * 2}")
-        return False
 
-    if result.returncode != 0:
-        print(f"❌ Claude Code failed with exit code {result.returncode}")
-        print(f"stderr: {result.stderr}")
-        return False
+        # Write parsed JSON to output file (pretty-printed)
+        with open(output_path, "w") as f:
+            json.dump(llm_response, f, indent=2)
 
-    # Check if output was written
-    if output_path.exists():
         print(f"✅ Entity classification complete: {output_path}")
         return True
-    else:
-        print("⚠️  Claude Code completed but output file not found")
-        print("Response:")
-        print(result.stdout[:500])
+    except RuntimeError as e:
+        print(f"❌ LLM invocation failed: {e}")
+        print(f"   💡 Tip: Increase timeout with --ai-timeout {timeout_seconds * 2}")
+        return False
+    except Exception as e:
+        print(f"❌ LLM invocation error: {e}")
         return False
 
 
@@ -491,6 +507,17 @@ Examples:
         default=900,
         help="Timeout in seconds for AI classification (default: 900 = 15 minutes)",
     )
+    parser.add_argument(
+        "--llm-months-back",
+        type=int,
+        default=0,
+        help="Limit LLM inputs to the last N months (0 = all data)",
+    )
+    parser.add_argument(
+        "--llm-config",
+        type=Path,
+        help="Path to LLM config YAML file (default: .llm_config.yaml if exists)",
+    )
 
     args = parser.parse_args()
 
@@ -499,14 +526,16 @@ Examples:
         print(f"❌ File not found: {args.json_file}")
         sys.exit(1)
 
-    # Check Claude Code if AI classification requested
+    # Check LLM provider if AI classification requested
     if args.ai_classify:
-        if not check_claude_code():
-            print("❌ Claude Code CLI not found")
-            print("\nInstall it first:")
-            print("https://code.claude.com/docs/en/quickstart")
+        if not check_claude_code(config_path=args.llm_config):
+            print("❌ No LLM provider found")
+            print("\nAvailable options:")
+            print("  1. LM Studio - Set up .llm_config.yaml with lmstudio endpoint")
+            print("  2. Claude CLI - Install from https://code.claude.com/docs/en/quickstart")
+            print("  3. Anthropic API - Set ANTHROPIC_API_KEY environment variable")
             sys.exit(1)
-        print("✅ Claude Code CLI found")
+        print("✅ LLM provider found")
 
     # Load data
     things, metadata = load_json_data(args.json_file)
@@ -531,7 +560,18 @@ Examples:
     mappings_path = Path("data/processed/entity_mappings.json")
 
     if args.ai_classify:
-        success = invoke_claude_classification(entities, mappings_path, args.ai_timeout)
+        llm_entities = entities
+        if args.llm_months_back > 0:
+            llm_things = filter_things_by_months(things, args.llm_months_back)
+            print(
+                f"\n🧠 LLM time filter: last {args.llm_months_back} months "
+                f"({len(llm_things):,} of {len(things):,} things)"
+            )
+            llm_entities = extract_entities(llm_things)
+
+        success = invoke_claude_classification(
+            llm_entities, mappings_path, args.ai_timeout, config_path=args.llm_config
+        )
         if not success:
             print("\n⚠️  AI classification failed")
             sys.exit(1)

@@ -45,7 +45,7 @@ except ImportError as e:
     sys.exit(1)
 
 
-def invoke_llm_via_claude_code(prompt: str, timeout: int = 120) -> Dict[str, Any]:
+def invoke_llm_via_claude_code(prompt: str, timeout: int = 120, config_path: Optional[Path] = None) -> Dict[str, Any]:
     """
     Invoke LLM for semantic analysis via unified backend.
 
@@ -58,6 +58,7 @@ def invoke_llm_via_claude_code(prompt: str, timeout: int = 120) -> Dict[str, Any
     Args:
         prompt: Analysis prompt (can be large, ~1K-2K chars)
         timeout: Timeout in seconds (default 120s for API calls)
+        config_path: Optional path to LLM config YAML file
 
     Returns:
         Parsed JSON response from LLM
@@ -67,7 +68,12 @@ def invoke_llm_via_claude_code(prompt: str, timeout: int = 120) -> Dict[str, Any
         subprocess.TimeoutExpired: If timeout exceeded
         ValueError: If JSON parsing fails
     """
-    return invoke_llm(prompt, response_format="json", timeout=timeout)
+    return invoke_llm(
+        prompt,
+        response_format="json",
+        timeout=timeout,
+        config_path=config_path,
+    )
 
 
 def fetch_things_in_month(
@@ -400,6 +406,7 @@ def build_month_summary(
     force: bool = False,
     dry_run: bool = False,
     builder_v: str = "1.0",
+    config_path: Optional[Path] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
     Build a single month summary.
@@ -484,7 +491,7 @@ def build_month_summary(
     # Invoke LLM
     try:
         print("LLM...", end=" ", flush=True)
-        llm_response = invoke_llm_via_claude_code(prompt)
+        llm_response = invoke_llm_via_claude_code(prompt, config_path=config_path)
     except Exception as e:
         error_msg = f"LLM invocation failed: {str(e)}"
         print(f"FAIL ({error_msg})")
@@ -615,7 +622,7 @@ def generate_month_windows(start_date: date, end_date: date) -> List[Tuple[date,
 
 
 def build(
-    db_path: Path, force: bool = False, months: int = 12, dry_run: bool = False
+    db_path: Path, force: bool = False, months: int = 12, dry_run: bool = False, config_path: Optional[Path] = None
 ) -> Dict[str, Any]:
     """
     Build LLM-powered monthly summaries.
@@ -681,7 +688,7 @@ def build(
         # Build each month
         for month_start, month_end in windows:
             was_built, error = build_month_summary(
-                conn, month_start, month_end, force, dry_run
+                conn, month_start, month_end, force, dry_run, config_path=config_path
             )
 
             if error:
@@ -741,6 +748,11 @@ def main():
         action="store_true",
         help="Show what would be built, don't invoke LLM",
     )
+    parser.add_argument(
+        "--llm-config",
+        type=Path,
+        help="Path to LLM config YAML file (default: .llm_config.yaml if exists)",
+    )
 
     args = parser.parse_args()
 
@@ -755,7 +767,7 @@ def main():
     print()
 
     result = build(
-        db_path=args.db, force=args.force, months=args.months, dry_run=args.dry_run
+        db_path=args.db, force=args.force, months=args.months, dry_run=args.dry_run, config_path=args.llm_config
     )
 
     if result["success"]:

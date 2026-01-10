@@ -78,14 +78,64 @@ Restart Claude Desktop and try:
 - Claude Desktop (for using the MCP server)
 
 ### Optional (for AI-powered features)
-- [Claude Code CLI](https://code.claude.com) - Enables AI-powered data grooming and entity classification
-- Active Claude subscription (if you have Claude Desktop, you already have this)
+
+Choose one of three LLM providers for AI-powered data grooming and entity classification:
+
+1. **LM Studio** (local/free) - Recommended for privacy-conscious users
+2. **Claude Code CLI** (subscription) - Uses your Claude subscription quota
+3. **Anthropic API** (pay-per-token) - Direct API access
 
 **Note:** AI features are optional. The MCP server works with basic grooming only.
 
-### Installing Claude Code (Optional)
+### LLM Configuration
 
-If you want to use AI-powered grooming and entity classification:
+Configure your preferred provider using a YAML config file (recommended):
+
+1. **Copy the example config:**
+   ```bash
+   cp .llm_config.yaml.example .llm_config.yaml
+   ```
+
+2. **Edit `.llm_config.yaml` with your provider settings:**
+   ```yaml
+   # For LM Studio (local, free, private)
+   default_provider: lmstudio
+   providers:
+     lmstudio:
+       endpoint: http://localhost:1234
+
+   # For Claude CLI (uses subscription)
+   # default_provider: claude-cli
+
+   # For Anthropic API (pay-per-token)
+   # default_provider: anthropic-api
+   # providers:
+   #   anthropic-api:
+   #     api_key: sk-ant-api03-...
+   ```
+
+3. **You're ready!** Scripts will use your configured provider for `--ai-analysis` or `--ai-classify` flags.
+
+**Important:** The config file is gitignored, so your API keys stay private.
+
+### Installing LM Studio (Recommended)
+
+For local, free AI processing:
+
+1. **Download LM Studio:** https://lmstudio.ai/
+2. **Load a model** (e.g., Llama, Mistral)
+3. **Start the local server** (default port 1234)
+4. **Configure:** Set `endpoint: http://localhost:1234` in `.llm_config.yaml`
+
+**Benefits:**
+- 100% local, no data sent to external servers
+- Free to use
+- No subscription or API costs
+- Works offline
+
+### Installing Claude Code CLI (Alternative)
+
+If you prefer using your Claude subscription:
 
 1. **Install Claude Code CLI:**
    ```bash
@@ -98,13 +148,22 @@ If you want to use AI-powered grooming and entity classification:
    claude --version
    ```
 
-3. **You're ready!** The scripts will automatically use Claude Code when you pass `--ai-analysis` or `--ai-classify` flags.
+3. **Configure:** Set `default_provider: claude-cli` in `.llm_config.yaml`
 
-**When AI features are used:**
+**When Claude CLI is used:**
 - Uses your Claude subscription quota (same as Claude Desktop)
 - Processing time: 2-5 minutes for typical datasets
 - Internet connection required
 - All data stays local (Claude Code runs on your machine)
+
+### Anthropic API (Alternative)
+
+For direct API access:
+
+1. **Get API key:** https://console.anthropic.com/
+2. **Configure:** Add `api_key` to `.llm_config.yaml`
+
+**Note:** Pay-per-token pricing applies.
 
 ### Installing spaCy NER (Optional, Recommended)
 

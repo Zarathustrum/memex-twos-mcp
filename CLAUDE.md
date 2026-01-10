@@ -574,6 +574,64 @@ Called by `setup_wizard.py` after database load (opt-in via prompt).
 4. Push to GitHub
 5. Data changes sourced from `<path-to-project>/memex-twos-data`
 
+## LLM Configuration
+
+**Provider Options:**
+- **LM Studio** (local/free) - Recommended for privacy-conscious users
+- **Claude CLI** (subscription) - Uses your Claude subscription quota
+- **Anthropic API** (pay-per-token) - Direct API access
+
+**Configuration Methods (Priority Order):**
+1. **YAML Config File** (Recommended):
+   - Copy `.llm_config.yaml.example` to `.llm_config.yaml`
+   - Edit with your provider settings
+   - Gitignored by default (safe for API keys)
+   ```yaml
+   default_provider: lmstudio
+   providers:
+     lmstudio:
+       endpoint: http://192.168.12.60:1234
+   ```
+
+2. **Environment Variables** (Fallback):
+   - `MEMEX_LLM_PROVIDER=lmstudio` - Default provider
+   - `LMSTUDIO_ENDPOINT=http://192.168.12.60:1234` - LM Studio URL
+   - `ANTHROPIC_API_KEY=sk-ant-...` - Anthropic API key
+
+3. **CLI Override** (Per-Command):
+   ```bash
+   python3 scripts/groom_data.py --llm-config /path/to/config.yaml
+   ```
+
+**Important Behavior:**
+- If you specify a `default_provider` in config, the system will **FAIL LOUDLY** if that provider is unavailable
+- No silent fallback to expensive Claude subscriptions - you'll get a clear error message
+- Only auto-detects providers when no explicit configuration is set
+
+**Example Setups:**
+
+*Local-Only (LM Studio):*
+```yaml
+default_provider: lmstudio
+providers:
+  lmstudio:
+    endpoint: http://192.168.12.60:1234
+```
+
+*Claude Subscription:*
+```yaml
+default_provider: claude-cli
+# No additional config needed, uses installed `claude` command
+```
+
+*Anthropic API:*
+```yaml
+default_provider: anthropic-api
+providers:
+  anthropic-api:
+    api_key: sk-ant-api03-...
+```
+
 ## LLM Micro-corrections
 
 Short reminders to avoid common retry loops during development. Scan this section before starting work.

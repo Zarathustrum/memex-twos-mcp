@@ -15,7 +15,7 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 # Rich imports with graceful degradation
 try:
@@ -69,6 +69,7 @@ class WizardConfig:
     export_file: str | None = None
     data_mode: str = "skip"  # "real", "sample", "skip"
     claude_config_path: str | None = None
+    months_back: int = 12  # LLM time window (0 = all data)
 
     # Results tracking (populated during execution)
     json_file: str = "data/processed/twos_data.json"
@@ -167,6 +168,12 @@ class ConsoleRenderer:
             table.add_row("", "")  # Spacer
             table.add_row("Grooming", "Yes" if config.run_grooming else "No")
             table.add_row("AI analysis", "Yes" if config.run_ai_analysis else "No")
+            llm_filter_value = (
+                f"{config.months_back} months"
+                if config.months_back > 0
+                else "All data"
+            )
+            table.add_row("LLM time filter", llm_filter_value)
             table.add_row(
                 "Entity classification",
                 "Yes" if config.run_entity_classification else "No",
@@ -266,16 +273,75 @@ class ConsoleRenderer:
 
 
 def prompt_yes_no(
-    renderer: ConsoleRenderer, question: str, default: bool = False
+    renderer: ConsoleRenderer, question: str, default: Optional[bool] = False
 ) -> bool:
     """Prompt user for yes/no answer."""
-    default_str = "Y/n" if default else "y/N"
-    response = input(f"{question} ({default_str}): ").strip().lower()
+    if default is None:
+        default_str = "y/n"
+    else:
+        default_str = "Y/n" if default else "y/N"
 
-    if not response:
-        return default
+    while True:
+        response = input(f"{question} ({default_str}): ").strip().lower()
 
-    return response in ["y", "yes"]
+        if not response:
+            if default is None:
+                renderer.status("WARN", "Please enter 'y' or 'n'.")
+                continue
+            return default
+
+        if response in ["y", "yes"]:
+            return True
+        if response in ["n", "no"]:
+            return False
+
+        renderer.status("WARN", "Please enter 'y' or 'n'.")
+
+
+def detect_llm_provider() -> Optional[str]:
+    """
+    Detect which LLM provider is available and return formatted description.
+
+    Returns:
+        Formatted string like "LM Studio (local/free)" or "Claude Code (subscription)"
+        or None if no provider available
+    """
+    try:
+        # Add scripts directory to path to import llm_utils
+        scripts_dir = Path(__file__).parent
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+
+        from llm_utils import select_provider
+
+        try:
+            provider = select_provider()
+            provider_name = provider.name
+            is_local = provider.is_local
+
+            # Format provider description
+            if provider_name == "lmstudio":
+                return "LM Studio (local/free)"
+            elif provider_name == "claude-cli":
+                return "Claude Code (subscription)"
+            elif provider_name == "anthropic-api":
+                return "Anthropic API (pay-per-token)"
+            elif provider_name == "openai-api":
+                return "OpenAI API (pay-per-token)"
+            elif provider_name == "gemini":
+                return "Google Gemini API (pay-per-token)"
+            elif provider_name == "ollama":
+                return "Ollama (local/free)"
+            elif is_local:
+                return f"{provider_name} (local/free)"
+            else:
+                return f"{provider_name} (cloud provider)"
+        except RuntimeError:
+            # No provider available
+            return None
+    except ImportError:
+        # llm_utils not yet available (deps not installed)
+        return None
 
 
 # ============================================================================
@@ -295,6 +361,7 @@ def collect_configuration(
         no_color=args.no_color,
         export_file=args.export_file,
         claude_config_path=args.claude_config,
+        months_back=args.months_back,
     )
 
     # If non-interactive, apply CLI flag defaults
@@ -359,21 +426,47 @@ def collect_configuration(
     # Only ask about processing if we have data
     if config.data_mode != "skip":
         print()
+
+        # Ask about LLM time window filter
+        months_input = input(
+            "Limit LLM inputs to last N months (0=all, 12=default) [12]: "
+        ).strip()
+        if months_input:
+            try:
+                config.months_back = max(0, int(months_input))
+            except ValueError:
+                renderer.status("WARN", f"Invalid input '{months_input}', using default (12)")
+                config.months_back = 12
+        else:
+            config.months_back = 12
+
+        if config.months_back > 0:
+            renderer.status(
+                "INFO",
+                f"LLM time filter: last {config.months_back} months (LLM only)",
+            )
+        else:
+            renderer.status("INFO", "LLM time filter: all data (LLM only)")
+
         config.run_grooming = prompt_yes_no(
             renderer, "Run data grooming (remove duplicates, fix issues)?", default=True
         )
 
+        # Detect LLM provider for displaying accurate prompts
+        llm_provider_desc = detect_llm_provider()
+        provider_text = f"uses {llm_provider_desc}" if llm_provider_desc else "requires LLM provider"
+
         if config.run_grooming:
             config.run_ai_analysis = prompt_yes_no(
                 renderer,
-                "Run AI semantic analysis (Developer/uses Claude Code subscription)?",
+                f"Run AI semantic analysis ({provider_text})?",
                 default=False,
             )
 
         # Entity classification is independent of AI semantic analysis
         config.run_entity_classification = prompt_yes_no(
             renderer,
-            "Run entity classification (filter misclassified entities, uses Claude Code)?",
+            f"Run entity classification (filter misclassified entities, {provider_text})?",
             default=False,
         )
 
@@ -386,7 +479,7 @@ def collect_configuration(
         if config.build_derived_indices:
             config.build_with_llm = prompt_yes_no(
                 renderer,
-                "Include LLM-powered monthly summaries (uses Claude Code subscription)?",
+                f"Include LLM-powered monthly summaries ({provider_text})?",
                 default=False,
             )
 
@@ -399,7 +492,7 @@ def collect_configuration(
     # MCP config
     print()
     config.generate_mcp_config = prompt_yes_no(
-        renderer, "Generate Claude Desktop MCP configuration?", default=True
+        renderer, "Generate Claude Desktop MCP configuration?", default=None
     )
 
     # Show confirmation
@@ -411,6 +504,12 @@ def collect_configuration(
     if config.data_mode != "skip":
         print(f"  Grooming: {'Yes' if config.run_grooming else 'No'}")
         print(f"  AI analysis: {'Yes' if config.run_ai_analysis else 'No'}")
+        llm_filter_text = (
+            f"  LLM time filter: {config.months_back} months"
+            if config.months_back > 0
+            else "  LLM time filter: all data"
+        )
+        print(llm_filter_text)
         print(
             f"  Entity classification: {'Yes' if config.run_entity_classification else 'No'}"
         )
@@ -568,15 +667,16 @@ def stage_convert(renderer: ConsoleRenderer, config: WizardConfig) -> StageResul
 
     try:
         with renderer.spinner("Converting Twos export to JSON"):
+            convert_args = [
+                sys.executable,
+                "src/convert_to_json.py",
+                "data/raw/twos_export.md",
+                "-o",
+                "data/processed/twos_data.json",
+                "--pretty",
+            ]
             result = subprocess.run(
-                [
-                    sys.executable,
-                    "src/convert_to_json.py",
-                    "data/raw/twos_export.md",
-                    "-o",
-                    "data/processed/twos_data.json",
-                    "--pretty",
-                ],
+                convert_args,
                 check=True,
                 capture_output=not config.verbose,
                 text=True,
@@ -612,6 +712,9 @@ def stage_grooming(renderer: ConsoleRenderer, config: WizardConfig) -> StageResu
 
         if config.run_ai_analysis:
             groom_args.append("--ai-analysis")
+            if config.months_back > 0:
+                groom_args.extend(["--llm-months-back", str(config.months_back)])
+
             with renderer.spinner(
                 "Running grooming (Python + AI analysis - may take 2-3 minutes)"
             ):
@@ -620,6 +723,7 @@ def stage_grooming(renderer: ConsoleRenderer, config: WizardConfig) -> StageResu
                     check=True,
                     capture_output=not config.verbose,
                     text=True,
+                    env=os.environ.copy(),
                 )
                 if config.verbose and result.stdout:
                     print(result.stdout)
@@ -631,6 +735,7 @@ def stage_grooming(renderer: ConsoleRenderer, config: WizardConfig) -> StageResu
                     check=True,
                     capture_output=not config.verbose,
                     text=True,
+                    env=os.environ.copy(),
                 )
                 if config.verbose and result.stdout:
                     print(result.stdout)
@@ -674,10 +779,16 @@ def stage_entity_classification(
                     config.json_file,
                     "--ai-classify",
                     "--apply-mappings",
-                ],
+                ]
+                + (
+                    ["--llm-months-back", str(config.months_back)]
+                    if config.months_back > 0
+                    else []
+                ),
                 check=True,
                 capture_output=not config.verbose,
                 text=True,
+                env=os.environ.copy(),
             )
             if config.verbose and result.stdout:
                 print(result.stdout)
@@ -905,12 +1016,10 @@ def stage_mcp_config(renderer: ConsoleRenderer, config: WizardConfig) -> StageRe
         return StageResult(success=True, duration=time.time() - start)
 
     try:
-        env = None
+        # Always inherit environment, optionally add MEMEX_CLAUDE_CONFIG
+        env = os.environ.copy()
         if config.claude_config_path:
-            env = {
-                **dict(os.environ),
-                "MEMEX_CLAUDE_CONFIG": config.claude_config_path,
-            }
+            env["MEMEX_CLAUDE_CONFIG"] = config.claude_config_path
 
         with renderer.spinner("Generating Claude Desktop configuration"):
             result = subprocess.run(
@@ -1086,6 +1195,12 @@ Examples:
         type=str,
         help="Path to Claude Desktop config file (overrides auto-detection)",
     )
+    parser.add_argument(
+        "--months-back",
+        type=int,
+        default=12,
+        help="Limit LLM inputs to last N months (0=all data, default: 12)",
+    )
 
     # Mode control
     parser.add_argument(
@@ -1150,7 +1265,7 @@ Examples:
         "--ai-analysis",
         action="store_true",
         default=False,
-        help="Run AI semantic analysis (Developer/uses Claude Code subscription)",
+        help="Run AI semantic analysis (uses configured LLM provider)",
     )
     parser.add_argument(
         "--skip-ai-analysis",

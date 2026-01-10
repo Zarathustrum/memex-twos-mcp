@@ -15,7 +15,124 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+# Import LLM utilities
+try:
+    from llm_utils import invoke_llm, check_llm_available
+except ImportError:
+    invoke_llm = None
+    check_llm_available = None
+
+
+def estimate_tokens(text: str) -> int:
+    """
+    Rough token estimate using character count.
+
+    Rule of thumb: ~3 characters per token for English prose.
+    Conservative for mixed Markdown/URLs and safer for prompt budgeting.
+
+    Args:
+        text: String to estimate tokens for
+
+    Returns:
+        Estimated token count
+    """
+    return len(text) // 3
+
+
+def filter_things_by_months(
+    things: List[Dict[str, Any]], months_back: int
+) -> List[Dict[str, Any]]:
+    """
+    Filter things to keep only items within the last N months.
+
+    Notes:
+        - Uses calendar-aware month subtraction for accurate boundaries.
+        - Items without parseable timestamps are kept to avoid accidental loss.
+    """
+    if months_back <= 0:
+        return things
+
+    from dateutil import parser
+    from dateutil.relativedelta import relativedelta
+
+    cutoff_date = datetime.now() - relativedelta(months=months_back)
+    filtered = []
+
+    for thing in things:
+        timestamp = thing.get("timestamp")
+        if not timestamp:
+            filtered.append(thing)
+            continue
+
+        try:
+            ts = parser.parse(timestamp)
+        except Exception:
+            filtered.append(thing)
+            continue
+
+        if ts >= cutoff_date:
+            filtered.append(thing)
+
+    return filtered
+
+
+def filter_changes_for_llm(
+    changes: "GroomingChanges",
+    things_by_id: Dict[str, Dict[str, Any]],
+    months_back: int,
+) -> "GroomingChanges":
+    """
+    Filter change summaries to only include items in the LLM time window.
+
+    Notes:
+        - Items without parseable timestamps are kept.
+        - Normalization flags are excluded and should be re-derived separately.
+    """
+    if months_back <= 0:
+        return changes
+
+    from dateutil import parser
+    from dateutil.relativedelta import relativedelta
+
+    cutoff_date = datetime.now() - relativedelta(months=months_back)
+
+    def in_window(timestamp: Optional[str]) -> bool:
+        if not timestamp:
+            return True
+        try:
+            ts = parser.parse(timestamp)
+        except Exception:
+            return True
+        return ts >= cutoff_date
+
+    filtered = GroomingChanges()
+
+    for removed in changes.removed:
+        if in_window(removed.get("timestamp")):
+            filtered.removed.append(removed)
+
+    for modified in changes.modified:
+        ts = things_by_id.get(modified["id"], {}).get("timestamp")
+        if in_window(ts):
+            filtered.modified.append(modified)
+
+    for item in changes.flagged_not_fixed.get("ambiguous_duplicates", []):
+        ids = item.get("items", [])
+        if not ids:
+            filtered.flagged_not_fixed["ambiguous_duplicates"].append(item)
+            continue
+        if any(in_window(things_by_id.get(i, {}).get("timestamp")) for i in ids):
+            filtered.flagged_not_fixed["ambiguous_duplicates"].append(item)
+
+    for item in changes.flagged_not_fixed.get("long_content", []):
+        thing_id = item.get("id")
+        ts = things_by_id.get(thing_id, {}).get("timestamp")
+        if in_window(ts):
+            filtered.flagged_not_fixed["long_content"].append(item)
+
+    return filtered
 
 
 class GroomingChanges:
@@ -87,14 +204,17 @@ class GroomingChanges:
 
 def check_claude_code() -> bool:
     """
-    Check if Claude Code CLI is installed.
+    Check if any LLM provider is available.
 
     Returns:
-        True if the `claude` executable is on PATH.
+        True if an LLM provider (LM Studio, Claude CLI, Anthropic API, etc.) is available.
     """
-    # Uses the system `which` command; return code 0 means found.
-    result = subprocess.run(["which", "claude"], capture_output=True, text=True)
-    return result.returncode == 0
+    if check_llm_available:
+        return check_llm_available()
+    else:
+        # Fallback: check if claude CLI exists
+        result = subprocess.run(["which", "claude"], capture_output=True, text=True)
+        return result.returncode == 0
 
 
 def load_json_data(json_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
@@ -489,6 +609,284 @@ def generate_changes_report_json(
     }
 
 
+def generate_compressed_prose_report(
+    stats: Dict[str, Any],
+    duplicates: List[Dict[str, Any]],
+    normalization: Dict[str, Any],
+    quality_issues: Dict[str, Any],
+    token_budget: int = 12000,
+) -> str:
+    """
+    Generate compressed prose-style report optimized for LLM context efficiency.
+
+    Uses narrative format with clustering to maximize information density while
+    staying within token budget. Designed for LM Studio with limited context.
+
+    Args:
+        stats: Summary statistics for the dataset.
+        duplicates: Duplicate detection results.
+        normalization: Case normalization opportunities.
+        quality_issues: Data quality issue buckets.
+        token_budget: Maximum tokens for this report (default 12K)
+
+    Returns:
+        Compressed prose report string, guaranteed under token_budget
+    """
+    sections = []
+
+    # Executive summary (always included, ~200-300 tokens)
+    total_issues = len(duplicates) + sum(len(normalization.get(k, [])) for k in ['people', 'tags'])
+    exec_summary = f"""## Executive Summary
+
+Analysis of {stats['total_things']:,} tasks ({stats['date_range']['earliest']} to {stats['date_range']['latest']}) identified {total_issues} optimization opportunities. Primary areas: duplicate consolidation ({len(duplicates)} clusters), entity normalization ({len(normalization.get('people', []))} people, {len(normalization.get('tags', []))} tags), and data quality validation."""
+    sections.append(exec_summary)
+
+    # Duplicate analysis with clustering (~2000-4000 tokens depending on patterns)
+    dup_section = _compress_duplicates_prose(duplicates, stats, token_budget=4000)
+    sections.append(dup_section)
+
+    # Normalization with clustering (~2000-3000 tokens)
+    norm_section = _compress_normalization_prose(normalization, token_budget=3000)
+    sections.append(norm_section)
+
+    # Quality issues (brief, ~500-1000 tokens)
+    quality_section = _compress_quality_prose(quality_issues, token_budget=1000)
+    sections.append(quality_section)
+
+    # Join and check budget
+    full_report = "\n\n".join(sections)
+    estimated_tokens = estimate_tokens(full_report)
+
+    # If over budget, apply aggressive truncation
+    if estimated_tokens > token_budget:
+        # Re-generate with tighter budgets
+        dup_section = _compress_duplicates_prose(duplicates, stats, token_budget=2500)
+        norm_section = _compress_normalization_prose(normalization, token_budget=2000)
+        quality_section = _compress_quality_prose(quality_issues, token_budget=500)
+        full_report = "\n\n".join([exec_summary, dup_section, norm_section, quality_section])
+
+    return full_report
+
+
+def _compress_duplicates_prose(
+    duplicates: List[Dict[str, Any]],
+    stats: Dict[str, Any],
+    token_budget: int
+) -> str:
+    """Generate compressed prose for duplicate analysis."""
+    if not duplicates:
+        return "## Duplicate Analysis\n\nNo duplicates detected."
+
+    # Cluster by content pattern
+    clusters = {}
+    for dup in duplicates:
+        # Extract pattern (first 30 chars as key)
+        pattern = dup['content'][:30]
+        if pattern not in clusters:
+            clusters[pattern] = {
+                'content': dup['content'],
+                'count': 0,
+                'exact': 0,
+                'ambiguous': 0,
+                'examples': []
+            }
+        clusters[pattern]['count'] += 1
+        if dup['is_exact']:
+            clusters[pattern]['exact'] += 1
+        else:
+            clusters[pattern]['ambiguous'] += 1
+        if len(clusters[pattern]['examples']) < 2:
+            clusters[pattern]['examples'].append(dup)
+
+    # Sort by frequency
+    sorted_clusters = sorted(clusters.items(), key=lambda x: x[1]['count'], reverse=True)
+
+    # Build prose narrative
+    exact_total = sum(c['exact'] for _, c in sorted_clusters)
+    ambig_total = sum(c['ambiguous'] for _, c in sorted_clusters)
+
+    prose = f"""## Duplicate Analysis ({len(duplicates)} items, {len(sorted_clusters)} patterns)
+
+Duplicate detection identified {len(duplicates)} potential duplicates across {len(sorted_clusters)} content patterns. Analysis shows {exact_total} exact duplicates (auto-removed) and {ambig_total} ambiguous cases requiring manual review."""
+
+    # Show top patterns in detail
+    detail_count = min(5, len(sorted_clusters))
+    if sorted_clusters:
+        prose += "\n\n**High-frequency patterns:**\n"
+        for i, (pattern, cluster) in enumerate(sorted_clusters[:detail_count], 1):
+            content_preview = cluster['content'][:50]
+            if cluster['examples']:
+                ex = cluster['examples'][0]
+                day_info = f"{ex['days_apart']} days apart" if ex['days_apart'] > 0 else "same day"
+                ids = f"{ex['items'][0]['id']}/{ex['items'][1]['id']}"
+            else:
+                day_info = "timing varies"
+                ids = "multiple"
+
+            status = "exact duplicates" if cluster['exact'] > cluster['ambiguous'] else "ambiguous timing"
+            prose += f"\n{i}. \"{content_preview}...\" - {cluster['count']} instances, {status} ({ids}, {day_info})"
+
+    # Summarize remaining clusters
+    if len(sorted_clusters) > detail_count:
+        remaining = len(sorted_clusters) - detail_count
+        remaining_count = sum(c['count'] for _, c in sorted_clusters[detail_count:])
+        prose += f"\n\n**Remaining {remaining} patterns** ({remaining_count} items): Lower-frequency duplicates following similar exact/ambiguous distribution."
+
+    # Check token budget and truncate if needed
+    if estimate_tokens(prose) > token_budget:
+        # Keep only top 3 patterns
+        prose_lines = prose.split('\n')
+        truncated = '\n'.join(prose_lines[:10])  # Keep header + top 3 patterns
+        truncated += f"\n\n*(Truncated to fit budget - {len(sorted_clusters) - 3} additional patterns summarized)*"
+        return truncated
+
+    return prose
+
+
+def _compress_normalization_prose(
+    normalization: Dict[str, Any],
+    token_budget: int
+) -> str:
+    """Generate compressed prose for normalization analysis."""
+    people_issues = normalization.get("people", [])
+    tags_issues = normalization.get("tags", [])
+    top_people = normalization.get("top_people", [])[:5]
+    top_tags = normalization.get("top_tags", [])[:5]
+
+    if not people_issues and not tags_issues:
+        return "## Normalization Analysis\n\nNo normalization opportunities identified."
+
+    prose = f"""## Normalization Analysis ({len(people_issues)} people, {len(tags_issues)} tags)
+
+Entity normalization scan identified {len(people_issues) + len(tags_issues)} opportunities for case/variant consolidation."""
+
+    # People
+    if people_issues:
+        prose += "\n\n**People normalization:**"
+        for i, issue in enumerate(people_issues[:3], 1):
+            canonical = issue["canonical"]
+            variant_summary = ", ".join([f'"{v[0]}" ({v[1]})' for v in issue["variants"][:2]])
+            total_variants = len(issue["variants"])
+            if total_variants > 2:
+                variant_summary += f" +{total_variants - 2} more"
+            prose += f"\n{i}. {canonical} ← {variant_summary}"
+
+        if len(people_issues) > 3:
+            prose += f"\n\n*({len(people_issues) - 3} additional people patterns similar)*"
+
+        # Top people context
+        if top_people:
+            top_names = ", ".join([f"{p[0]} ({p[1]})" for p in top_people[:3]])
+            prose += f"\n\nMost frequent: {top_names}"
+
+    # Tags
+    if tags_issues:
+        prose += "\n\n**Tag normalization:**"
+        for i, issue in enumerate(tags_issues[:3], 1):
+            canonical = issue["canonical"]
+            variant_summary = ", ".join([f'#{v[0]}# ({v[1]})' for v in issue["variants"][:2]])
+            total_variants = len(issue["variants"])
+            if total_variants > 2:
+                variant_summary += f" +{total_variants - 2} more"
+            prose += f"\n{i}. #{canonical}# ← {variant_summary}"
+
+        if len(tags_issues) > 3:
+            prose += f"\n\n*({len(tags_issues) - 3} additional tag patterns similar)*"
+
+        # Top tags context
+        if top_tags:
+            top_tag_names = ", ".join([f"#{t[0]}# ({t[1]})" for t in top_tags[:3]])
+            prose += f"\n\nMost frequent: {top_tag_names}"
+
+    # Check budget
+    if estimate_tokens(prose) > token_budget:
+        # Reduce to top 2 of each
+        prose_lines = prose.split('\n')[:15]
+        return '\n'.join(prose_lines) + "\n\n*(Truncated)*"
+
+    return prose
+
+
+def _compress_quality_prose(
+    quality_issues: Dict[str, Any],
+    token_budget: int
+) -> str:
+    """Generate compressed prose for quality issues."""
+    if not quality_issues:
+        return "## Data Quality\n\nNo critical quality issues detected."
+
+    total_issues = sum(len(items) if isinstance(items, list) else 1 for items in quality_issues.values())
+
+    prose = f"""## Data Quality ({total_issues} issues)
+
+Quality validation identified {total_issues} items requiring attention across {len(quality_issues)} categories."""
+
+    # Summarize each issue type
+    for issue_type, items in list(quality_issues.items())[:3]:
+        issue_name = issue_type.replace('_', ' ').title()
+        if isinstance(items, list):
+            count = len(items)
+            prose += f"\n\n**{issue_name}:** {count} instances"
+            # Show first example if available
+            if items and isinstance(items[0], dict):
+                example = str(items[0])[:60]
+                prose += f" (e.g., {example}...)"
+        else:
+            prose += f"\n\n**{issue_name}:** {items}"
+
+    if len(quality_issues) > 3:
+        prose += f"\n\n*({len(quality_issues) - 3} additional quality categories identified)*"
+
+    return prose
+
+
+def _compress_changes_summary(
+    changes: GroomingChanges,
+    token_budget: int = 3000
+) -> str:
+    """Generate compressed summary of auto-fixes applied."""
+    total_removed = len(changes.removed)
+    total_modified = len(changes.modified)
+    total_flagged = sum(len(items) for items in changes.flagged_not_fixed.values())
+
+    if total_removed == 0 and total_modified == 0 and total_flagged == 0:
+        return "No auto-fixes required - data is clean."
+
+    prose = f"""Auto-fix summary: {total_removed} items removed, {total_modified} items modified, {total_flagged} items flagged for manual review."""
+
+    # Removed items (cluster by reason)
+    if total_removed > 0:
+        removal_reasons = {}
+        for item in changes.removed:
+            reason = item.get('reason', 'unknown')
+            if reason not in removal_reasons:
+                removal_reasons[reason] = 0
+            removal_reasons[reason] += 1
+
+        prose += "\n\n**Removals:**"
+        for reason, count in sorted(removal_reasons.items(), key=lambda x: x[1], reverse=True):
+            reason_label = reason.replace('_', ' ').title()
+            prose += f" {count} {reason_label},"
+        prose = prose.rstrip(',') + "."
+
+    # Modified items (cluster by type)
+    if total_modified > 0 and len(changes.modified) <= 5:
+        prose += f"\n\n**Modifications:** {total_modified} items (broken references fixed, normalization applied)."
+    elif total_modified > 0:
+        prose += f"\n\n**Modifications:** {total_modified} items updated."
+
+    # Flagged items
+    if total_flagged > 0:
+        prose += f"\n\n**Flagged for review:** {total_flagged} items across {len(changes.flagged_not_fixed)} categories require manual judgment."
+
+    # Check budget
+    if estimate_tokens(prose) > token_budget:
+        # Ultra-compressed version
+        return f"Auto-fixes: {total_removed} removed, {total_modified} modified, {total_flagged} flagged for review."
+
+    return prose
+
+
 def generate_python_report(
     stats: Dict[str, Any],
     duplicates: List[Dict[str, Any]],
@@ -655,33 +1053,37 @@ def analyze_statistics(things: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def invoke_claude_analysis(
     json_path: Path,
-    python_report_path: Path,
-    changes_report_path: Path,
+    stats: Dict[str, Any],
+    duplicates: List[Dict[str, Any]],
+    normalization: Dict[str, Any],
+    quality_issues: Dict[str, Any],
+    changes: GroomingChanges,
     output_path: Path,
     timeout_seconds: int = 900,
+    llm_context_note: Optional[str] = None,
+    config_path: Optional[Path] = None,
 ) -> bool:
     """
-    Invoke Claude Code for semantic analysis.
+    Invoke LLM for semantic analysis with token-budget-aware compression.
 
     Args:
         json_path: Path to the original JSON input file.
-        python_report_path: Path to the Python analysis report.
-        changes_report_path: Path to the changes report.
+        stats: Analysis statistics
+        duplicates: Duplicate detection results
+        normalization: Normalization opportunities
+        quality_issues: Data quality issues
+        changes: GroomingChanges object with auto-fix history
         output_path: Path where the AI report should be written.
-        timeout_seconds: Timeout in seconds for Claude Code (default: 900 = 15 minutes).
-
-    Side effects:
-        Executes the external `claude` CLI, which may use subscription quota
-        and write an output report to disk.
+        timeout_seconds: Timeout in seconds (default: 900 = 15 minutes).
+        llm_context_note: Optional note about LLM time window or scope.
 
     Returns:
         True if the output file was written, otherwise False.
     """
 
-    print("\n🤖 Invoking Claude Code for semantic analysis...")
-    print("   (This will use your subscription quota)")
+    print("\n🤖 Invoking LLM for semantic analysis...")
     print(f"   ⏱️  Timeout: {timeout_seconds} seconds ({timeout_seconds//60} minutes)")
-    print("   💭 Large datasets may take several minutes - please wait...")
+    print("   💭 Compressing reports to fit context window...")
 
     # Read the grooming prompt template.
     prompt_file = Path("docs/DATA_GROOMING_PROMPT.md")
@@ -692,82 +1094,73 @@ def invoke_claude_analysis(
     with open(prompt_file) as f:
         grooming_prompt = f.read()
 
-    # Read the Python report.
-    with open(python_report_path) as f:
-        python_summary = f.read()
+    # Generate compressed prose summaries (token-budget aware)
+    python_summary = generate_compressed_prose_report(
+        stats, duplicates, normalization, quality_issues, token_budget=12000
+    )
 
-    # Read the changes report.
-    with open(changes_report_path) as f:
-        changes_summary = f.read()
+    # Compressed changes summary
+    changes_summary = _compress_changes_summary(changes, token_budget=3000)
 
-    # Build the full prompt that instructs Claude Code.
+    # Calculate token estimates
+    template_tokens = estimate_tokens(grooming_prompt)
+    analysis_tokens = estimate_tokens(python_summary)
+    changes_tokens = estimate_tokens(changes_summary)
+    instructions_tokens = 150  # Rough estimate for instructions below
+
+    total_prompt_tokens = template_tokens + analysis_tokens + changes_tokens + instructions_tokens
+
+    print(f"   📊 Token budget (estimated):")
+    print(f"      Template: ~{template_tokens:,} tokens")
+    print(f"      Analysis: ~{analysis_tokens:,} tokens")
+    print(f"      Changes: ~{changes_tokens:,} tokens")
+    print(f"      Total prompt: ~{total_prompt_tokens:,} tokens")
+    print(f"      Generation budget: ~{32000 - total_prompt_tokens:,} tokens")
+
+    if total_prompt_tokens > 20000:
+        print(f"   ⚠️  WARNING: Prompt exceeds target (20K), may hit context limit")
+
+    # Build the full prompt
     full_prompt = f"""{grooming_prompt}
 
-PYTHON PRE-ANALYSIS AND AUTO-FIXES COMPLETED:
+# PYTHON PRE-ANALYSIS (Compressed Summary)
 
-## Python Analysis Summary:
+{llm_context_note or ""}
+
 {python_summary}
 
-## Auto-Fixes Applied:
+# AUTO-FIXES APPLIED
+
 {changes_summary}
 
-YOUR TASK:
+# YOUR TASK
 
-1. Read the CLEANED data from: {json_path.parent / (json_path.stem + '_cleaned.json')}
-2. Provide SEMANTIC ANALYSIS focusing on:
-   - Pattern interpretation and theme detection
-   - Project threads and narratives across time
-   - Schema optimization recommendations
-   - Judgment on ambiguous duplicates flagged above
-   - Entity categorization (person vs place vs project)
-   - Recommendations on normalization opportunities
+Provide semantic analysis focusing on pattern interpretation, themes, and entity categorization. The mechanical analysis above is complete - focus on insights requiring semantic understanding.
 
-3. Write your COMPLETE semantic grooming report to: {output_path}
-
-Focus on insights that require semantic understanding - the mechanical checks and fixes are already done.
-
-Execute steps 1-3 now without asking for confirmation.
+Write your complete semantic grooming report directly (no file operations needed).
 """
 
-    # Invoke Claude Code CLI; this spawns a subprocess and captures output.
+    # Invoke LLM via unified provider abstraction
     try:
-        result = subprocess.run(
-            [
-                "claude",
-                "--print",
-                "--tools",
-                "Read,Write",
-                "--allowedTools",
-                "Read,Write",
-                "--dangerously-skip-permissions",
-                "--no-session-persistence",
-                full_prompt,
-            ],
-            capture_output=True,
-            text=True,
+        llm_response = invoke_llm(
+            prompt=full_prompt,
+            response_format="text",
             timeout=timeout_seconds,
-            stdin=subprocess.DEVNULL,  # Signal no input coming - prevents waiting for stdin
+            config_path=config_path,
         )
-    except subprocess.TimeoutExpired:
-        print(
-            f"❌ Claude Code timed out after {timeout_seconds} seconds ({timeout_seconds//60} minutes)"
-        )
-        print(f"   💡 Tip: Increase timeout with --ai-timeout {timeout_seconds * 2}")
-        return False
 
-    if result.returncode != 0:
-        print(f"❌ Claude Code failed with exit code {result.returncode}")
-        print(f"stderr: {result.stderr}")
-        return False
+        # Write response to output file
+        with open(output_path, "w") as f:
+            f.write(llm_response)
 
-    # Check if output was written to the expected file.
-    if output_path.exists():
         print(f"✅ Semantic analysis complete: {output_path}")
         return True
-    else:
-        print("⚠️  Claude Code completed but output file not found")
-        print("Response:")
-        print(result.stdout[:500])
+    except RuntimeError as e:
+        print(f"❌ LLM invocation failed: {e}")
+        print(f"   💡 Tip: Increase timeout with --ai-timeout {timeout_seconds * 2}")
+        return False
+    except Exception as e:
+        print(f"❌ LLM invocation error: {e}")
         return False
 
 
@@ -835,6 +1228,17 @@ Examples:
         default=900,
         help="Timeout in seconds for AI analysis (default: 900 = 15 minutes)",
     )
+    parser.add_argument(
+        "--llm-months-back",
+        type=int,
+        default=0,
+        help="Limit LLM analysis inputs to the last N months (0 = all data)",
+    )
+    parser.add_argument(
+        "--llm-config",
+        type=Path,
+        help="Path to LLM config YAML file (default: .llm_config.yaml if exists)",
+    )
 
     args = parser.parse_args()
 
@@ -846,11 +1250,13 @@ Examples:
     # Check Claude Code if AI analysis requested.
     if args.ai_analysis:
         if not check_claude_code():
-            print("❌ Claude Code CLI not found")
-            print("\nInstall it first:")
-            print("https://code.claude.com/docs/en/quickstart")
+            print("❌ No LLM provider available")
+            print("\nInstall one of:")
+            print("  - LM Studio: https://lmstudio.ai/ (local/free)")
+            print("  - Claude Code CLI: https://code.claude.com/docs/en/quickstart")
+            print("  - Anthropic API: pip install -e '.[llm-anthropic]' + set ANTHROPIC_API_KEY")
             sys.exit(1)
-        print("✅ Claude Code CLI found")
+        print("✅ LLM provider available")
 
     # Load data from JSON on disk.
     things, metadata = load_json_data(args.json_file)
@@ -908,6 +1314,58 @@ Examples:
     print(f"  ✅ Fixed {len(changes.modified)} broken references")
     print(f"  ✅ Cleaned: {cleaned_count:,} things (from {original_count:,})")
 
+    llm_stats = stats
+    llm_duplicates = duplicates
+    llm_normalization = normalization
+    llm_quality_issues = quality_issues
+    llm_changes = changes
+    llm_context_note = None
+
+    if args.ai_analysis and args.llm_months_back > 0:
+        llm_things = filter_things_by_months(things, args.llm_months_back)
+        llm_total = len(llm_things)
+        print(
+            f"\n🧠 LLM time filter: last {args.llm_months_back} months "
+            f"({llm_total:,} of {original_count:,} things)"
+        )
+
+        llm_stats = analyze_statistics(llm_things)
+        llm_duplicates = analyze_duplicates(llm_things, args.duplicate_window)
+        llm_normalization = analyze_normalization(llm_things)
+        llm_quality_issues = analyze_data_quality(
+            llm_things, args.long_content_threshold
+        )
+
+        things_by_id = {t["id"]: t for t in things}
+        llm_changes = filter_changes_for_llm(
+            changes, things_by_id, args.llm_months_back
+        )
+
+        for person_issue in llm_normalization["people"]:
+            llm_changes.add_flagged(
+                "normalization",
+                {
+                    "type": "person",
+                    "description": f"{person_issue['canonical']} has {len(person_issue['variants'])} variants",
+                    "recommendation": f"Standardize all to '{person_issue['canonical']}'",
+                },
+            )
+
+        for tag_issue in llm_normalization["tags"]:
+            llm_changes.add_flagged(
+                "normalization",
+                {
+                    "type": "tag",
+                    "description": f"{tag_issue['canonical']} has {len(tag_issue['variants'])} variants",
+                    "recommendation": f"Standardize all to '{tag_issue['canonical']}'",
+                },
+            )
+
+        llm_context_note = (
+            f"LLM time window: last {args.llm_months_back} months. "
+            f"Items summarized: {llm_total:,} of {original_count:,}."
+        )
+
     # Save cleaned data to a new JSON file on disk.
     cleaned_path = args.json_file.parent / (args.json_file.stem + "_cleaned.json")
 
@@ -961,15 +1419,20 @@ Examples:
 
     print(f"  - {python_report_path}")
 
-    # Optionally run Claude analysis (external CLI, may use quota).
+    # Optionally run AI analysis (uses configured LLM provider).
     if args.ai_analysis:
         ai_report_path = reports_dir / f"{timestamp}-ai-analysis.md"
         success = invoke_claude_analysis(
             args.json_file,
-            python_report_path,
-            changes_md_path,
+            llm_stats,
+            llm_duplicates,
+            llm_normalization,
+            llm_quality_issues,
+            llm_changes,
             ai_report_path,
             args.ai_timeout,
+            llm_context_note,
+            config_path=args.llm_config,
         )
         if not success:
             print("\n⚠️  AI analysis failed, but cleaned data and reports are available")

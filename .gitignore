@@ -60,6 +60,9 @@ htmlcov/
 *.mcp.json
 mcp-server.log
 
+# LLM Config (may contain API keys)
+.llm_config.yaml
+
 # Node.js (accidental artifacts)
 node_modules/
 package-lock.json
@@ -73,3 +76,7 @@ docs/entity-reports/*.json
 
 # Temporary files
 tmp/
+
+# Local debug and raw data directories
+debug/
+raw/

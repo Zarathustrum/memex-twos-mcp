@@ -3,10 +3,11 @@
 Unified LLM Backend Abstraction Layer
 
 Provides a consistent interface for LLM invocations across the memex-twos-mcp
-project, with pluggable backends (Claude Code CLI, Anthropic API).
+project, with pluggable providers (Anthropic API, OpenAI, Gemini, Ollama,
+LM Studio, Claude Code CLI).
 
 This centralizes:
-- Backend detection and selection
+- Provider detection and selection
 - Error handling and retry logic
 - Response parsing (JSON, text, markdown)
 - Timeout and rate limit management
@@ -18,91 +19,173 @@ Usage:
     # Simple JSON invocation
     response = invoke_llm(prompt="Analyze this data...", response_format="json")
 
-    # With backend selection
-    response = invoke_llm(prompt="...", backend="claude-cli", timeout=300)
+    # With provider selection
+    response = invoke_llm(prompt="...", provider="anthropic-api", timeout=300)
 
     # Check availability before use
     if not check_llm_available():
-        print("No LLM backend available")
+        print("No LLM provider available")
 
-Backend Priority:
-1. Anthropic API (if ANTHROPIC_API_KEY env var set) - future
+Provider Priority (Auto-Detection):
+1. Anthropic API (if ANTHROPIC_API_KEY env var set)
 2. Claude Code CLI (if `claude` executable on PATH)
-3. Error if none available
+3. (Future: OpenAI, Gemini, Ollama, LM Studio)
 
 Billing Notes:
 - Claude Code CLI: Uses user's Claude subscription quota
-- Anthropic API: Direct API billing (future)
+- Anthropic API: Direct API billing (pay-per-token)
+- (Future: OpenAI, Gemini = API billing; Ollama, LM Studio = local/free)
 """
 
 from __future__ import annotations
 
 import json
 import re
-import subprocess
-import tempfile
+import sys
 from pathlib import Path
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, Optional
+
+# Import provider infrastructure
+try:
+    from llm_providers import LLMProvider, LLMProviderError, LLMResponse
+    from llm_providers.factory import get_default_provider, get_provider
+    from llm_config import load_config
+except ImportError as e:
+    print(
+        f"ERROR: Could not import llm_providers. "
+        f"Make sure you're in the correct directory: {e}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 # ============================================================================
-# Backend Detection
+# Provider Selection
 # ============================================================================
 
 
-def check_claude_cli_installed() -> bool:
+def select_provider(
+    provider_name: Optional[str] = None,
+    config_path: Optional[Path] = None,
+    **provider_kwargs
+) -> LLMProvider:
     """
-    Check if Claude Code CLI is installed and available on PATH.
-
-    Returns:
-        True if `claude` executable is found.
-    """
-    result = subprocess.run(["which", "claude"], capture_output=True, text=True)
-    return result.returncode == 0
-
-
-def detect_backend() -> str:
-    """
-    Auto-detect which LLM backend is available.
+    Select and initialize LLM provider.
 
     Priority:
-    1. Anthropic API (if ANTHROPIC_API_KEY set) - future
-    2. Claude Code CLI (if `claude` on PATH)
+    1. Explicit provider_name argument
+    2. default_provider from config (YAML or env var)
+    3. Auto-detect (first available provider)
+
+    IMPORTANT: If provider_name is explicitly specified (either as argument or in config),
+    this function will FAIL LOUDLY if that provider is unavailable. No silent fallback.
+
+    Args:
+        provider_name: Provider identifier (e.g., "anthropic-api", "claude-cli")
+        config_path: Optional path to YAML config file
+        **provider_kwargs: Provider-specific initialization arguments
 
     Returns:
-        Backend name: "api" or "claude-cli"
+        LLMProvider instance
 
     Raises:
-        RuntimeError: If no backend is available
+        RuntimeError: If explicit provider is unavailable, or no provider found
+
+    Examples:
+        >>> provider = select_provider("lmstudio")  # Fails loudly if unavailable
+        >>> provider = select_provider()  # Auto-detect
+        >>> provider = select_provider(config_path=Path("config.yaml"))
     """
-    # Future: Check for API key
-    # if os.getenv("ANTHROPIC_API_KEY"):
-    #     return "api"
+    config = load_config(config_path)
 
-    if check_claude_cli_installed():
-        return "claude-cli"
+    # 1. Explicit provider argument
+    if provider_name:
+        try:
+            # Get provider config if available
+            provider_config = config.get_provider_config(provider_name)
+            kwargs = provider_kwargs.copy()
 
-    raise RuntimeError(
-        "No LLM backend available. Install Claude Code CLI: "
-        "https://code.claude.com/docs/en/quickstart"
-    )
+            # Merge config into kwargs (kwargs take precedence)
+            if provider_config:
+                if provider_config.api_key and "api_key" not in kwargs:
+                    kwargs["api_key"] = provider_config.api_key
+                if provider_config.endpoint and "endpoint" not in kwargs:
+                    kwargs["endpoint"] = provider_config.endpoint
+                if (
+                    provider_config.default_model
+                    and "default_model" not in kwargs
+                ):
+                    kwargs["default_model"] = provider_config.default_model
+
+            provider = get_provider(provider_name, **kwargs)
+
+            # Validate provider is available
+            if not provider.is_available():
+                errors = provider.validate_config()
+                error_details = "\n  - ".join(errors) if errors else "Unknown reason"
+                raise RuntimeError(
+                    f"Provider '{provider_name}' not available:\n  - {error_details}"
+                )
+
+            return provider
+
+        except (ValueError, ImportError) as e:
+            raise RuntimeError(
+                f"Failed to initialize provider '{provider_name}': {e}"
+            ) from e
+
+    # 2. Try configured default provider - FAIL LOUDLY if configured but unavailable
+    if config.default_provider:
+        try:
+            return select_provider(config.default_provider, config_path, **provider_kwargs)
+        except RuntimeError as e:
+            # Explicit config means NO SILENT FALLBACK
+            print(
+                f"\n[ERROR] Configured default provider '{config.default_provider}' is unavailable.",
+                file=sys.stderr,
+            )
+            raise RuntimeError(
+                f"Configured default provider '{config.default_provider}' is unavailable. "
+                f"Fix the configuration or remove default_provider to auto-detect.\n"
+                f"Details: {e}"
+            ) from e
+
+    # 3. Auto-detect
+    provider = get_default_provider()
+    if provider is None:
+        raise RuntimeError(
+            "No LLM provider available. Install one of:\n"
+            "  - Claude CLI: https://code.claude.com/docs/en/quickstart\n"
+            "  - Anthropic API: pip install -e '.[llm-anthropic]' + "
+            "set ANTHROPIC_API_KEY\n"
+            "  - (Future: OpenAI, Gemini, Ollama, LM Studio)"
+        )
+
+    return provider
 
 
-def check_llm_available() -> bool:
+def check_llm_available(config_path: Optional[Path] = None) -> bool:
     """
-    Check if any LLM backend is available.
+    Check if any LLM provider is available.
+
+    Args:
+        config_path: Optional path to YAML config file
 
     Returns:
-        True if at least one backend is usable.
+        True if at least one provider is usable.
+
+    Examples:
+        >>> if check_llm_available():
+        ...     response = invoke_llm("Hello!")
     """
     try:
-        detect_backend()
+        select_provider(config_path=config_path)
         return True
     except RuntimeError:
         return False
 
 
 # ============================================================================
-# Response Parsing
+# Response Parsing (PRESERVED FROM ORIGINAL)
 # ============================================================================
 
 
@@ -171,109 +254,6 @@ def extract_json_from_response(text: str) -> Dict[str, Any]:
 
 
 # ============================================================================
-# Backend Implementations
-# ============================================================================
-
-
-def invoke_claude_cli(
-    prompt: str,
-    model: str = "sonnet",
-    timeout: int = 120,
-    response_format: str = "json",
-) -> str:
-    """
-    Invoke Claude Code CLI for LLM processing.
-
-    External dependency: Requires `claude` CLI installed and authenticated.
-    Billing: Consumes user's Claude subscription quota.
-
-    Security considerations:
-    - Temp file used to avoid command-line injection
-    - Timeout enforced to prevent indefinite hangs
-    - Temp file cleaned up even on error (finally block)
-
-    Failure modes:
-    - Claude CLI not installed → RuntimeError
-    - API rate limit hit → RuntimeError (retry manually)
-    - Timeout exceeded → subprocess.TimeoutExpired → RuntimeError
-    - Network failure → RuntimeError
-
-    Args:
-        prompt: Analysis prompt (can be large, ~1K-5K chars)
-        model: Model name (sonnet, opus, haiku)
-        timeout: Timeout in seconds (default 120s)
-        response_format: Expected format (json, text, markdown)
-
-    Returns:
-        Raw response text from Claude
-
-    Raises:
-        RuntimeError: If CLI invocation fails
-        subprocess.TimeoutExpired: If timeout exceeded
-    """
-    # Write prompt to temp file to avoid shell injection
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        prompt_file = Path(f.name)
-        f.write(prompt)
-
-    try:
-        # Invoke claude with prompt file via stdin
-        # Note: Using cat | claude pattern for stdin compatibility
-        result = subprocess.run(
-            ["bash", "-c", f"cat {prompt_file} | claude --model {model}"],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(f"Claude CLI invocation failed: {result.stderr}")
-
-        return result.stdout
-
-    finally:
-        # Cleanup temp file
-        if prompt_file.exists():
-            prompt_file.unlink()
-
-
-def invoke_anthropic_api(
-    prompt: str,
-    model: str = "claude-sonnet-4-5",
-    timeout: int = 120,
-    response_format: str = "json",
-) -> str:
-    """
-    Invoke Anthropic API directly for LLM processing.
-
-    FUTURE: Not yet implemented. Placeholder for API-based backend.
-
-    Requires:
-    - ANTHROPIC_API_KEY environment variable
-    - anthropic Python SDK: pip install anthropic
-
-    Advantages over CLI:
-    - Lower latency (no CLI overhead)
-    - Better rate limit handling
-    - Programmatic retry logic
-    - Token counting and cost tracking
-
-    Args:
-        prompt: Analysis prompt
-        model: Model ID (claude-sonnet-4-5, etc.)
-        timeout: Timeout in seconds
-        response_format: Expected format (json, text, markdown)
-
-    Returns:
-        Raw response text from API
-
-    Raises:
-        NotImplementedError: Always (not yet implemented)
-    """
-    raise NotImplementedError("API backend not yet implemented. Use claude-cli.")
-
-
-# ============================================================================
 # Public Interface
 # ============================================================================
 
@@ -281,19 +261,25 @@ def invoke_anthropic_api(
 def invoke_llm(
     prompt: str,
     response_format: Literal["json", "text", "markdown"] = "json",
-    model: str = "sonnet",
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
     timeout: int = 120,
-    backend: Literal["auto", "claude-cli", "api"] = "auto",
+    temperature: float = 0.7,
+    max_tokens: Optional[int] = None,
+    config_path: Optional[Path] = None,
 ) -> Dict[str, Any] | str:
     """
-    Unified LLM invocation with pluggable backends.
+    Unified LLM invocation with pluggable providers.
 
     This is the primary interface for all LLM calls in the project.
-    Handles backend selection, invocation, parsing, and error handling.
+    Handles provider selection, invocation, parsing, and error handling.
+
+    BACKWARD COMPATIBLE: Existing calls work unchanged (new params optional).
 
     Billing awareness:
     - Claude CLI: Uses subscription quota (~2K-5K tokens per call)
-    - API: Direct billing (future)
+    - Anthropic API: Direct billing (pay-per-token)
+    - (Future: OpenAI, Gemini = billing; Ollama, LM Studio = local/free)
 
     Response parsing:
     - response_format="json": Returns parsed dict, raises if invalid JSON
@@ -302,10 +288,13 @@ def invoke_llm(
 
     Args:
         prompt: The prompt to send to the LLM
-        response_format: Expected response format
-        model: Model to use (sonnet, opus, haiku for CLI; full ID for API)
+        response_format: Expected response format (json, text, markdown)
+        provider: Provider to use (None = auto-detect)
+        model: Model to use (None = provider default)
         timeout: Timeout in seconds (default 120s)
-        backend: Backend to use (auto-detect, claude-cli, or api)
+        temperature: Sampling temperature 0-1 (lower = more deterministic)
+        max_tokens: Maximum tokens to generate (None = provider default)
+        config_path: Optional path to YAML config file
 
     Returns:
         Parsed JSON dict (if response_format="json") or raw string
@@ -313,37 +302,74 @@ def invoke_llm(
     Raises:
         RuntimeError: If LLM invocation fails
         ValueError: If JSON parsing fails (response_format="json")
-        subprocess.TimeoutExpired: If timeout exceeded
 
     Examples:
         >>> response = invoke_llm("Analyze: {...}", response_format="json")
         >>> print(response["themes"])
 
-        >>> text = invoke_llm("Summarize: ...", response_format="text")
+        >>> text = invoke_llm("Summarize: ...", response_format="text",
+        ...                   provider="anthropic-api")
         >>> print(text)
     """
-    # Detect backend if auto
-    if backend == "auto":
-        backend = detect_backend()
+    # Select provider
+    try:
+        llm_provider = select_provider(provider, config_path=config_path)
+    except RuntimeError as e:
+        print(f"\n[ERROR] Provider selection failed: {e}", file=sys.stderr)
+        raise
 
-    # Invoke backend
-    if backend == "claude-cli":
-        raw_response = invoke_claude_cli(prompt, model, timeout, response_format)
-    elif backend == "api":
-        raw_response = invoke_anthropic_api(prompt, model, timeout, response_format)
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
+    # Generate response
+    try:
+        llm_response: LLMResponse = llm_provider.generate_text(
+            prompt=prompt,
+            model=model,
+            timeout=timeout,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    except LLMProviderError as e:
+        # Enhanced error reporting with actionable hints
+        error_msg = f"LLM invocation failed ({e.provider}, {e.error_type}): {e}"
+        print(f"\n[ERROR] {error_msg}", file=sys.stderr)
+
+        # Provider-specific hints
+        if e.error_type == "rate_limit":
+            print(
+                "[HINT] Rate limit hit. Wait and retry, or switch provider.",
+                file=sys.stderr,
+            )
+        elif e.error_type == "auth":
+            print("[HINT] Check API key configuration.", file=sys.stderr)
+        elif e.error_type == "timeout":
+            print(
+                f"[HINT] Timeout after {timeout}s. Try increasing timeout.",
+                file=sys.stderr,
+            )
+        elif e.error_type == "unavailable":
+            print(
+                "[HINT] Provider not available. Install or configure it.",
+                file=sys.stderr,
+            )
+
+        raise RuntimeError(error_msg) from e
 
     # Parse response based on format
+    raw_response = llm_response.content
+
     if response_format == "json":
         try:
             return extract_json_from_response(raw_response)
         except Exception as e:
             # DEBUG: Log raw response on parse failure
-            import sys
-
             print(f"\n[ERROR] JSON parsing failed: {e}", file=sys.stderr)
-            print("[ERROR] Raw LLM response (first 500 chars):", file=sys.stderr)
+            print(
+                f"[ERROR] Provider: {llm_response.provider}, "
+                f"Model: {llm_response.model}",
+                file=sys.stderr,
+            )
+            print(
+                "[ERROR] Raw response (first 500 chars):", file=sys.stderr
+            )
             print(raw_response[:500], file=sys.stderr)
             raise
     else:
@@ -351,7 +377,7 @@ def invoke_llm(
 
 
 # ============================================================================
-# Legacy Compatibility Wrappers
+# Legacy Compatibility Wrappers (PRESERVED FROM ORIGINAL)
 # ============================================================================
 
 
@@ -361,11 +387,18 @@ def invoke_llm_via_claude_code(prompt: str, timeout: int = 120) -> Dict[str, Any
 
     DEPRECATED: Use invoke_llm() directly.
 
+    Forces Claude CLI provider for exact backward compatibility.
+
     Args:
         prompt: Analysis prompt
         timeout: Timeout in seconds
 
     Returns:
         Parsed JSON response
+
+    Examples:
+        >>> response = invoke_llm_via_claude_code("Analyze month data...")
     """
-    return invoke_llm(prompt, response_format="json", timeout=timeout)
+    return invoke_llm(
+        prompt, response_format="json", provider="claude-cli", timeout=timeout
+    )

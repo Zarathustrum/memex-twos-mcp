@@ -660,7 +660,6 @@ def parse_twos_file(file_path: Path, use_ner: bool = True) -> Dict[str, Any]:
     Args:
         file_path: Path to the Twos export file (Markdown with timestamps format).
         use_ner: Whether to use spaCy NER for people extraction (default: True)
-
     Returns:
         Dictionary with metadata and list of tasks
 
@@ -672,6 +671,10 @@ def parse_twos_file(file_path: Path, use_ner: bool = True) -> Dict[str, Any]:
         id: str
         indent: int
 
+    # Read entire file content first
+    with open(file_path, "r", encoding="utf-8") as f:
+        file_content = f.read()
+
     tasks = []
     current_section = ""
     current_section_date = ""
@@ -679,102 +682,102 @@ def parse_twos_file(file_path: Path, use_ner: bool = True) -> Dict[str, Any]:
     # Track parent tasks for hierarchy based on indentation.
     parent_stack: list[ParentEntry] = []
 
-    # I/O boundary: read the Twos export file line-by-line.
-    with open(file_path, "r", encoding="utf-8") as f:
-        for line_num, line in enumerate(f, 1):
-            line_stripped = line.rstrip("\n")
+    # Parse the filtered content line-by-line
+    lines = file_content.split('\n')
+    for line_num, line in enumerate(lines, 1):
+        line_stripped = line.rstrip("\n")
 
-            # Skip empty lines and reset hierarchy.
-            if not line_stripped:
-                parent_stack = []
-                continue
+        # Skip empty lines and reset hierarchy.
+        if not line_stripped:
+            parent_stack = []
+            continue
 
-            # Check for section header that groups tasks by date.
-            if line_stripped.startswith("# ⌛️"):
-                # Extract date from header using a simple regex.
-                header_match = re.match(r"# ⌛️\s+(.+?)\s+\(([^)]+)\)", line_stripped)
-                if header_match:
-                    current_section = header_match.group(1)
-                    current_section_date = header_match.group(2)
-                parent_stack = []
-                continue
+        # Check for section header that groups tasks by date.
+        if line_stripped.startswith("# ⌛️"):
+            # Extract date from header using a simple regex.
+            header_match = re.match(r"# ⌛️\s+(.+?)\s+\(([^)]+)\)", line_stripped)
+            if header_match:
+                current_section = header_match.group(1)
+                current_section_date = header_match.group(2)
+            parent_stack = []
+            continue
 
-            # Check for task item lines (bullets, dashes, or checkboxes).
-            if line_stripped and (
-                line_stripped.lstrip().startswith("•")
-                or line_stripped.lstrip().startswith("- [")
-                or line_stripped.lstrip().startswith("-")
-            ):
+        # Check for task item lines (bullets, dashes, or checkboxes).
+        if line_stripped and (
+            line_stripped.lstrip().startswith("•")
+            or line_stripped.lstrip().startswith("- [")
+            or line_stripped.lstrip().startswith("-")
+        ):
 
-                # Calculate indent level to infer parent-child relationships.
-                indent_level = len(line) - len(line.lstrip())
-                indent_tabs = (
-                    indent_level // 8 if "\t" in line else 0
-                )  # Assuming 8-space tabs
+            # Calculate indent level to infer parent-child relationships.
+            indent_level = len(line) - len(line.lstrip())
+            indent_tabs = (
+                indent_level // 8 if "\t" in line else 0
+            )  # Assuming 8-space tabs
 
-                # Extract timestamp that appears at the end of the line.
-                timestamp_match = re.search(
-                    r"(\d{1,2}/\d{1,2}/\d{2,4}\s+\d{1,2}:\d{2}\s*[ap]m)\s*$",
-                    line_stripped,
-                    re.IGNORECASE,
-                )
+            # Extract timestamp that appears at the end of the line.
+            timestamp_match = re.search(
+                r"(\d{1,2}/\d{1,2}/\d{2,4}\s+\d{1,2}:\d{2}\s*[ap]m)\s*$",
+                line_stripped,
+                re.IGNORECASE,
+            )
 
-                if timestamp_match:
-                    timestamp_str = timestamp_match.group(1)
-                    timestamp_iso = parse_timestamp(timestamp_str)
+            if timestamp_match:
+                timestamp_str = timestamp_match.group(1)
+                timestamp_iso = parse_timestamp(timestamp_str)
 
-                    if timestamp_iso:
-                        # Clean content for storage and indexing.
-                        content_clean = clean_content(line_stripped)
+                if timestamp_iso:
+                    # Clean content for storage and indexing.
+                    content_clean = clean_content(line_stripped)
 
-                        # Generate stable ID from content hash (not sequential counter)
-                        stable_id = compute_stable_id(
-                            timestamp_iso, content_clean, current_section
-                        )
+                    # Generate stable ID from content hash (not sequential counter)
+                    stable_id = compute_stable_id(
+                        timestamp_iso, content_clean, current_section
+                    )
 
-                        # Determine parent task based on indent depth.
-                        parent_id = None
-                        if indent_tabs > 0 and parent_stack:
-                            # Find parent at previous indent level
-                            for i in range(len(parent_stack) - 1, -1, -1):
-                                if parent_stack[i]["indent"] < indent_tabs:
-                                    parent_id = parent_stack[i]["id"]
-                                    break
+                    # Determine parent task based on indent depth.
+                    parent_id = None
+                    if indent_tabs > 0 and parent_stack:
+                        # Find parent at previous indent level
+                        for i in range(len(parent_stack) - 1, -1, -1):
+                            if parent_stack[i]["indent"] < indent_tabs:
+                                parent_id = parent_stack[i]["id"]
+                                break
 
-                        # Build task object with extracted metadata.
-                        task = {
-                            "id": stable_id,
-                            "line_number": line_num,
-                            "timestamp": timestamp_iso,
-                            "timestamp_raw": timestamp_str,
-                            "section_header": current_section,
-                            "section_date": current_section_date,
-                            "content": content_clean,
-                            "content_raw": line_stripped,
-                            "indent_level": indent_tabs,
-                            "parent_task_id": parent_id,
-                            "bullet_type": get_bullet_type(line_stripped),
-                            "is_completed": is_completed(line_stripped),
-                            "is_pending": is_pending_checkbox(line_stripped),
-                            "is_strikethrough": is_strikethrough(content_clean),
-                            "links": extract_links(content_clean),
-                            "tags": extract_tags(content_clean),
-                            "people_mentioned": [],  # Will be filled by batch processing
-                        }
+                    # Build task object with extracted metadata.
+                    task = {
+                        "id": stable_id,
+                        "line_number": line_num,
+                        "timestamp": timestamp_iso,
+                        "timestamp_raw": timestamp_str,
+                        "section_header": current_section,
+                        "section_date": current_section_date,
+                        "content": content_clean,
+                        "content_raw": line_stripped,
+                        "indent_level": indent_tabs,
+                        "parent_task_id": parent_id,
+                        "bullet_type": get_bullet_type(line_stripped),
+                        "is_completed": is_completed(line_stripped),
+                        "is_pending": is_pending_checkbox(line_stripped),
+                        "is_strikethrough": is_strikethrough(content_clean),
+                        "links": extract_links(content_clean),
+                        "tags": extract_tags(content_clean),
+                        "people_mentioned": [],  # Will be filled by batch processing
+                    }
 
-                        tasks.append(task)
+                    tasks.append(task)
 
-                        # Update parent stack so children can link to this task.
-                        # Remove items at same or higher indent.
-                        parent_stack = [
-                            entry
-                            for entry in parent_stack
-                            if entry["indent"] < indent_tabs
-                        ]
-                        task_id = str(task["id"])
-                        parent_stack.append({"id": task_id, "indent": indent_tabs})
+                    # Update parent stack so children can link to this task.
+                    # Remove items at same or higher indent.
+                    parent_stack = [
+                        entry
+                        for entry in parent_stack
+                        if entry["indent"] < indent_tabs
+                    ]
+                    task_id = str(task["id"])
+                    parent_stack.append({"id": task_id, "indent": indent_tabs})
 
-                        task_id_counter += 1
+                    task_id_counter += 1
 
     # Batch extract people after all tasks parsed (if using NER)
     if use_ner:
@@ -851,7 +854,6 @@ def main():
         action="store_true",
         help="Disable NER extraction, use regex fallback (faster but less accurate)",
     )
-
     args = parser.parse_args()
 
     if not args.input_file.exists():
